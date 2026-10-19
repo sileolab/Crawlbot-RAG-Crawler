@@ -2316,9 +2316,199 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById(id)?.addEventListener('change', updateAIStudioInfo);
     });
 
+    // ------------------------------------------------------------------------
+    // Module: File & Data Processing Studio
+    // ------------------------------------------------------------------------
+    const fileState = {
+        uploadedFileId: null,
+        uploadedFileInfo: null,
+        lastArtifactData: null,
+        activePreviewTab: 'output',
+    };
+
+    const filesApi = {
+        async upload(file) {
+            const formData = new FormData();
+            formData.append('file', file);
+            const res = await fetch('/api/files/upload', {
+                method: 'POST',
+                body: formData,
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'خطا در بارگذاری فایل');
+            }
+            return res.json();
+        },
+        async process(fileId, operations, options) {
+            const res = await fetch('/api/files/process', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ file_id: fileId, operations, options }),
+            });
+            if (!res.ok) {
+                const err = await res.json().catch(() => ({}));
+                throw new Error(err.detail || 'خطا در پردازش فایل');
+            }
+            return res.json();
+        },
+    };
+
+    function initFileProcessingStudio() {
+        const dropzone = document.getElementById('file-dropzone');
+        const fileInput = document.getElementById('input-file-upload');
+        const btnRunProcess = document.getElementById('btn-run-file-process');
+        const fileInfoPanel = document.getElementById('file-info-panel');
+        const fileResultsPanel = document.getElementById('file-results-panel');
+
+        if (!dropzone || !fileInput) return;
+
+        dropzone.addEventListener('click', () => fileInput.click());
+
+        ['dragenter', 'dragover'].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropzone.classList.add('dragover');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(eventName => {
+            dropzone.addEventListener(eventName, (e) => {
+                e.preventDefault();
+                dropzone.classList.remove('dragover');
+            });
+        });
+
+        dropzone.addEventListener('drop', (e) => {
+            const files = e.dataTransfer?.files;
+            if (files && files.length > 0) {
+                handleFileSelect(files[0]);
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files && fileInput.files.length > 0) {
+                handleFileSelect(fileInput.files[0]);
+            }
+        });
+
+        async function handleFileSelect(file) {
+            showToast(`در حال بارگذاری فایل ${file.name}...`, 'info');
+            try {
+                const res = await filesApi.upload(file);
+                const info = res.data;
+                fileState.uploadedFileId = info.file_id;
+                fileState.uploadedFileInfo = info;
+
+                document.getElementById('file-info-name').textContent = info.filename;
+                document.getElementById('file-info-format').textContent = (info.format || '').toUpperCase();
+                document.getElementById('file-info-size').textContent = `${(info.size_bytes / 1024).toFixed(1)} KB`;
+                document.getElementById('file-info-lines').textContent = info.line_count || '0';
+                document.getElementById('file-info-encoding').textContent = info.encoding || 'UTF-8';
+
+                showEl('file-info-panel', true);
+                if (btnRunProcess) btnRunProcess.disabled = false;
+                const badge = document.getElementById('files-badge-count');
+                if (badge) badge.textContent = '1';
+
+                showToast(`فایل ${info.filename} با موفقیت بارگذاری گردید.`, 'success');
+            } catch (err) {
+                showToast(`خطا در بارگذاری فایل: ${err.message}`, 'error');
+            }
+        }
+
+        if (btnRunProcess) {
+            btnRunProcess.addEventListener('click', async () => {
+                if (!fileState.uploadedFileId) {
+                    showToast('ابتدا باید یک فایل معتبر بارگذاری نمایید.', 'warning');
+                    return;
+                }
+
+                const ops = [];
+                if (document.getElementById('check-file-op-normalize')?.checked) ops.push('normalize');
+                if (document.getElementById('check-file-op-md2json')?.checked) ops.push('markdown_to_json');
+                if (document.getElementById('check-file-op-validate')?.checked) ops.push('json_validate');
+                if (document.getElementById('check-file-op-cleanup')?.checked) ops.push('json_cleanup');
+                if (document.getElementById('check-file-op-chunk')?.checked) ops.push('chunk');
+                if (document.getElementById('check-file-op-enrich')?.checked) ops.push('metadata_enrich');
+
+                if (ops.length === 0) {
+                    showToast('حداقل یک عملیات پردازشی را انتخاب نمایید.', 'warning');
+                    return;
+                }
+
+                const options = {
+                    chunk_strategy: document.getElementById('select-file-chunk-strategy')?.value || 'auto',
+                    chunk_size: parseInt(document.getElementById('input-file-chunk-size')?.value || '1000', 10),
+                    overlap: parseInt(document.getElementById('input-file-chunk-overlap')?.value || '150', 10),
+                    category: document.getElementById('input-file-category')?.value || null,
+                    output_format: document.getElementById('select-file-output-format')?.value || 'json',
+                };
+
+                const origHtml = btnRunProcess.innerHTML;
+                btnRunProcess.disabled = true;
+                btnRunProcess.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> <span>در حال پردازش خط لوله...</span>';
+                showToast('فرآیند پردازش خط لوله آغاز شد...', 'info');
+
+                try {
+                    const res = await filesApi.process(fileState.uploadedFileId, ops, options);
+                    const data = res.data;
+                    fileState.lastArtifactData = data;
+
+                    document.getElementById('stat-file-records-in').textContent = data.telemetry?.records_in || 0;
+                    document.getElementById('stat-file-records-out').textContent = data.telemetry?.records_out || 0;
+                    document.getElementById('stat-file-chunks').textContent = data.telemetry?.chunks_produced || 0;
+                    document.getElementById('stat-file-fixes').textContent = data.telemetry?.normalization_fixes || 0;
+                    document.getElementById('stat-file-duration').textContent = `${data.duration_seconds || 0}s`;
+
+                    const btnDownload = document.getElementById('btn-download-file-result');
+                    if (btnDownload) {
+                        btnDownload.href = data.download_url;
+                        btnDownload.setAttribute('download', data.filename);
+                    }
+
+                    const preOutput = document.getElementById('file-preview-output-content');
+                    if (preOutput) preOutput.textContent = data.output_preview || '// خروجی خالی';
+
+                    const preDiff = document.getElementById('file-preview-diff-content');
+                    if (preDiff) preDiff.textContent = data.diff || '// تغییری نسبت به نسخه اولیه وجود ندارد.';
+
+                    showEl('file-results-panel', true);
+                    showToast('پردازش خط لوله فایل با موفقیت کامل انجام شد.', 'success');
+                } catch (err) {
+                    showToast(`خطا در پردازش فایل: ${err.message}`, 'error');
+                } finally {
+                    btnRunProcess.disabled = false;
+                    btnRunProcess.innerHTML = origHtml;
+                }
+            });
+        }
+
+        const tabOutput = document.getElementById('tab-file-preview-output');
+        const tabDiff = document.getElementById('tab-file-preview-diff');
+        const codeOutput = document.getElementById('file-preview-output-content');
+        const codeDiff = document.getElementById('file-preview-diff-content');
+
+        if (tabOutput && tabDiff) {
+            tabOutput.addEventListener('click', () => {
+                tabOutput.classList.add('active');
+                tabDiff.classList.remove('active');
+                if (codeOutput) codeOutput.classList.remove('hidden');
+                if (codeDiff) codeDiff.classList.add('hidden');
+            });
+            tabDiff.addEventListener('click', () => {
+                tabDiff.classList.add('active');
+                tabOutput.classList.remove('active');
+                if (codeOutput) codeOutput.classList.add('hidden');
+                if (codeDiff) codeDiff.classList.remove('hidden');
+            });
+        }
+    }
+
     // Initial check on load
     checkAIStatus();
     updateLivePreview('json');
+    initFileProcessingStudio();
 
     // Periodic synchronization with active extraction job
     setInterval(() => {

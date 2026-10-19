@@ -6,8 +6,9 @@ ready for embedding and RAG ingestion.
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import Enum
-from typing import Optional
+from typing import Optional, Union
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -53,6 +54,26 @@ class DocumentChunk(BaseModel):
     content_hash: Optional[str] = Field(
         default=None,
         description="SHA-256 fingerprint hash of the chunk text.",
+    )
+    source_doc_id: Optional[str] = Field(
+        default=None,
+        description="Persistent identifier of the source document.",
+    )
+    source_doc_hash: Optional[str] = Field(
+        default=None,
+        description="SHA-256 fingerprint hash of the source document.",
+    )
+    processed_at: Optional[Union[datetime, str]] = Field(
+        default=None,
+        description="ISO-8601 timestamp of processing.",
+    )
+    quality_flags: list[str] = Field(
+        default_factory=list,
+        description="Quality, noise, or structure flags attached to this chunk.",
+    )
+    normalization_applied: bool = Field(
+        default=False,
+        description="Whether text normalization was performed on this chunk.",
     )
     metadata: dict = Field(
         default_factory=dict,

@@ -14,7 +14,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
-from app.api import routes_discovery, routes_exports, routes_extraction, routes_jobs, routes_ai
+from app.api import routes_discovery, routes_exports, routes_extraction, routes_jobs, routes_ai, routes_files
 from app.core.config import get_settings
 from app.core.logging_config import get_logger, setup_logging
 from app.jobs.manager import JobManager
@@ -60,6 +60,7 @@ def create_app() -> FastAPI:
     app.include_router(routes_jobs.router)
     app.include_router(routes_exports.router)
     app.include_router(routes_ai.router)
+    app.include_router(routes_files.router)
 
     # Static files setup
     static_dir = Path(__file__).parent / "static"

@@ -1906,3 +1906,163 @@ code, pre, .text-monospace {
     0%, 100% { box-shadow: 0 0 0 0 var(--color-ai-glow); }
     50% { box-shadow: 0 0 0 8px rgba(168, 85, 247, 0); }
 }
+
+/* --------------------------------------------------------------------------
+   19. File & Data Processing Studio
+   -------------------------------------------------------------------------- */
+.file-dropzone {
+    border: 2px dashed var(--color-border);
+    border-radius: var(--radius-lg);
+    background: rgba(255, 255, 255, 0.015);
+    padding: 2.2rem 1.5rem;
+    text-align: center;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+}
+
+.file-dropzone:hover,
+.file-dropzone.dragover {
+    border-color: var(--color-primary);
+    background: rgba(99, 102, 241, 0.05);
+    transform: translateY(-1px);
+}
+
+.dropzone-icon {
+    font-size: 2.6rem;
+    color: var(--color-primary);
+    margin-bottom: 0.25rem;
+}
+
+.dropzone-title {
+    font-size: 1.05rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin: 0;
+}
+
+.dropzone-hint {
+    font-size: 0.82rem;
+    color: var(--color-text-muted);
+}
+
+.file-info-badge-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 0.75rem;
+    margin-top: 1rem;
+    padding: 0.9rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+}
+
+.file-info-badge-item {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+
+.file-info-badge-label {
+    font-size: 0.76rem;
+    color: var(--color-text-muted);
+}
+
+.file-info-badge-val {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    direction: ltr;
+    text-align: right;
+    word-break: break-all;
+}
+
+.file-ops-selection-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 0.85rem;
+    margin-bottom: 1.25rem;
+}
+
+.file-op-card {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.file-op-card:hover {
+    border-color: var(--color-primary);
+    background: rgba(99, 102, 241, 0.03);
+}
+
+.file-op-card input[type="checkbox"] {
+    margin-top: 0.25rem;
+    accent-color: var(--color-primary);
+    cursor: pointer;
+    width: 1.1rem;
+    height: 1.1rem;
+}
+
+.file-op-title {
+    font-size: 0.92rem;
+    font-weight: 600;
+    color: var(--color-text-primary);
+    margin-bottom: 0.2rem;
+}
+
+.file-op-desc {
+    font-size: 0.8rem;
+    color: var(--color-text-muted);
+    line-height: 1.4;
+}
+
+.file-telemetry-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+    gap: 0.85rem;
+    margin-bottom: 1rem;
+}
+
+.file-telemetry-card {
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid var(--color-border-subtle);
+    border-radius: var(--radius-md);
+    padding: 0.85rem;
+    text-align: center;
+}
+
+.file-telemetry-num {
+    font-size: 1.4rem;
+    font-weight: 700;
+    color: var(--color-primary);
+    margin-bottom: 0.2rem;
+}
+
+.file-telemetry-label {
+    font-size: 0.78rem;
+    color: var(--color-text-muted);
+}
+
+.diff-view-code {
+    background: #0f172a;
+    color: #e2e8f0;
+    padding: 1rem;
+    border-radius: var(--radius-md);
+    font-family: monospace;
+    font-size: 0.85rem;
+    white-space: pre-wrap;
+    max-height: 380px;
+    overflow-y: auto;
+    direction: ltr;
+    text-align: left;
+}

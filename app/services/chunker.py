@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
+from datetime import datetime, timezone
 from typing import Optional
 
 from ..schemas.chunks import ChunkingResult, ChunkingStrategy, DocumentChunk
@@ -37,6 +38,32 @@ _ABBR_RE = re.compile(
     re.IGNORECASE,
 )
 _PERSIAN_ABBR_RE = re.compile(r"(?:\b|\s)(?:ص|ش|ق|م|هـ|د)\.\s*")
+
+_UI_NOISE_RE = re.compile(
+    r"(?:استفاده از کوکی|پذیرش کوکی|کوکی‌ها|cookie policy|use cookies|accept cookies|"
+    r"تمامی حقوق محفوظ است|کلیه حقوق محفوظ|all rights reserved|"
+    r"ورود / ثبت‌نام|ورود یا عضویت|رمز عبور خود را فراموش|log in / sign up|sign in to your account|"
+    r"صفحه نخست >|خانه >|home >)",
+    re.IGNORECASE,
+)
+
+
+def detect_chunk_quality_flags(text: str, heading_ctx: Optional[str] = None) -> list[str]:
+    """Detect non-destructive quality flags such as UI noise, boilerplate, or low-information content."""
+    flags: list[str] = []
+    clean = text.strip()
+    words = clean.split()
+
+    if len(words) < 5 or len(clean) < 25:
+        flags.append("low_info")
+
+    if _UI_NOISE_RE.search(clean):
+        flags.append("ui_noise")
+        flags.append("boilerplate")
+    elif heading_ctx and any(k in heading_ctx.lower() for k in ["footer", "فوتر", "منو", "navigation", "nav"]):
+        flags.append("ui_noise")
+
+    return flags
 
 
 # ---------------------------------------------------------------------------
@@ -599,6 +626,21 @@ class ChunkerService:
             word_count = len(chunk_text.split())
             char_count = len(chunk_text)
 
+            # Fallback category to ensure non-null, meaningful categorization
+            resolved_category = (
+                category
+                or (heading_ctx.split(" > ")[0].strip() if heading_ctx else None)
+                or getattr(doc, "page_type", None)
+                or "general"
+            )
+
+            q_flags = detect_chunk_quality_flags(chunk_text, heading_ctx)
+            norm_applied = (
+                bool(doc.metadata.get("normalized", False))
+                if hasattr(doc, "metadata") and isinstance(doc.metadata, dict)
+                else False
+            )
+
             dc = DocumentChunk(
                 chunk_id=chunk_id,
                 source_url=doc.url,
@@ -611,8 +653,13 @@ class ChunkerService:
                 title=doc.title,
                 source_title=doc.title,
                 language=doc.language,
-                category=category,
+                category=resolved_category,
                 content_hash=chunk_hash,
+                source_doc_id=getattr(doc, "document_id", None),
+                source_doc_hash=getattr(doc, "content_hash", None),
+                processed_at=datetime.now(timezone.utc).isoformat(),
+                quality_flags=q_flags,
+                normalization_applied=norm_applied,
                 metadata={
                     "source_doc_hash": doc.content_hash,
                     "content_hash": chunk_hash,
@@ -620,6 +667,7 @@ class ChunkerService:
                     "fetched_at": doc.fetched_at.isoformat() if doc.fetched_at else None,
                     "strategy": applied_strategy,
                     "selection_reason": reason if self.strategy == "auto" else None,
+                    "quality_flags": q_flags,
                 },
             )
             doc_chunks.append(dc)

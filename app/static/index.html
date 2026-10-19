@@ -47,6 +47,11 @@
                         <span>استودیوی RAG</span>
                         <span class="tab-counter tab-counter-ai" id="ai-badge-count">AI</span>
                     </button>
+                    <button type="button" class="tab-button" id="tab-btn-files" data-tab="files" role="tab" aria-selected="false" aria-controls="tab-content-files" title="پردازش فایل و داده: نرمال‌سازی، تبدیل و تقطیع اسناد">
+                        <i class="fa-solid fa-folder-open"></i>
+                        <span>پردازش فایل</span>
+                        <span class="tab-counter" id="files-badge-count">0</span>
+                    </button>
                 </div>
             </nav>
 
@@ -877,6 +882,227 @@
                     </div>
                     <div class="ai-preview-content">
                         <pre class="ai-preview-code" id="ai-preview-code">// داده‌های خروجی پس از اجرای پردازش در این بخش نمایش داده می‌شوند...</pre>
+                    </div>
+                </div>
+            </div>
+
+        <!-- ============================================== -->
+        <!-- TAB 4: FILE & DATA PROCESSING (پردازش فایل و داده) -->
+        <!-- ============================================== -->
+        <section class="tab-content" id="tab-content-files" role="tabpanel" aria-labelledby="tab-btn-files">
+            
+            <!-- Upload & File Information Card -->
+            <div class="card file-upload-main-card">
+                <div class="card-header-compact">
+                    <div class="card-title-group">
+                        <div class="title-icon-box">
+                            <i class="fa-solid fa-cloud-arrow-up title-icon"></i>
+                        </div>
+                        <div>
+                            <h2>پردازش فایل و داده‌های RAG</h2>
+                            <span class="card-subtitle">بارگذاری اسناد Markdown, Text, JSON, JSONL, CSV، نرمال‌سازی فارسی، تبدیل ساختار و تولید قطعات استاندارد</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-body-compact">
+                    <div class="file-dropzone" id="file-dropzone">
+                        <i class="fa-solid fa-file-arrow-up dropzone-icon"></i>
+                        <h3 class="dropzone-title">فایل خود را اینجا رها کنید یا برای انتخاب کلیک نمایید</h3>
+                        <p class="dropzone-hint">پشتیبانی از فرمت‌های Markdown (.md)، متن ساده (.txt)، فایل‌های JSON (.json)، رکوردهای خطی (.jsonl) و CSV (.csv) — تا ۱۰ مگابایت</p>
+                        <input type="file" id="input-file-upload" class="hidden" accept=".md,.txt,.json,.jsonl,.csv" />
+                    </div>
+
+                    <!-- File Details Pill/Grid (Initially Hidden) -->
+                    <div class="file-info-badge-grid hidden" id="file-info-panel">
+                        <div class="file-info-badge-item">
+                            <span class="file-info-badge-label">نام فایل:</span>
+                            <span class="file-info-badge-val" id="file-info-name">-</span>
+                        </div>
+                        <div class="file-info-badge-item">
+                            <span class="file-info-badge-label">فرمت فایل:</span>
+                            <span class="file-info-badge-val" id="file-info-format">-</span>
+                        </div>
+                        <div class="file-info-badge-item">
+                            <span class="file-info-badge-label">اندازه فایل:</span>
+                            <span class="file-info-badge-val" id="file-info-size">-</span>
+                        </div>
+                        <div class="file-info-badge-item">
+                            <span class="file-info-badge-label">تعداد خطوط/رکورد:</span>
+                            <span class="file-info-badge-val" id="file-info-lines">0</span>
+                        </div>
+                        <div class="file-info-badge-item">
+                            <span class="file-info-badge-label">انکودینگ:</span>
+                            <span class="file-info-badge-val" id="file-info-encoding">UTF-8</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Operations & Pipeline Configuration Card -->
+            <div class="card file-operations-card">
+                <div class="card-header-compact">
+                    <div class="card-title-group">
+                        <div class="title-icon-box">
+                            <i class="fa-solid fa-sliders title-icon"></i>
+                        </div>
+                        <div>
+                            <h2>انتخاب عملیات و تنظیمات خط لوله</h2>
+                            <span class="card-subtitle">انتخاب زنجیره عملیات مورد نظر روی فایل و تنظیم پارامترهای خروجی</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-body-compact">
+                    <!-- Operation Selector Grid -->
+                    <label class="form-label-rounded" style="margin-bottom: 0.75rem; display: block;">عملیات مورد نظر برای اجرا (Pipeline):</label>
+                    <div class="file-ops-selection-grid">
+                        <label class="file-op-card" for="check-file-op-normalize">
+                            <input type="checkbox" id="check-file-op-normalize" value="normalize" checked />
+                            <div>
+                                <div class="file-op-title">نرمال‌سازی فارسی و یونیکد</div>
+                                <div class="file-op-desc">Unicode NFC، یکسان‌سازی حروف ي/ی و ك/ک، اصلاح نیم‌فاصله افعال (نمی‌شود) و جمع‌ها (داده‌ها)</div>
+                            </div>
+                        </label>
+                        <label class="file-op-card" for="check-file-op-md2json">
+                            <input type="checkbox" id="check-file-op-md2json" value="markdown_to_json" />
+                            <div>
+                                <div class="file-op-title">تبدیل Markdown به JSON</div>
+                                <div class="file-op-desc">استخراج سلسله‌مراتب تیترها، بخش‌ها، فهرست‌ها و جداول در قالب آبجکت استاندارد JSON</div>
+                            </div>
+                        </label>
+                        <label class="file-op-card" for="check-file-op-validate">
+                            <input type="checkbox" id="check-file-op-validate" value="json_validate" />
+                            <div>
+                                <div class="file-op-title">اعتبارسنجی ساختار JSON</div>
+                                <div class="file-op-desc">بررسی ساختار نحوی، اعتبارسنجی عمق تودرتویی و گزارش خطاهای خط به خط</div>
+                            </div>
+                        </label>
+                        <label class="file-op-card" for="check-file-op-cleanup">
+                            <input type="checkbox" id="check-file-op-cleanup" value="json_cleanup" />
+                            <div>
+                                <div class="file-op-title">پاکسازی مقادیر JSON</div>
+                                <div class="file-op-desc">حذف فاصله‌های زاید، پالایش مقادیر تهی (null) و یکدست‌سازی ساختار رکوردهای داده</div>
+                            </div>
+                        </label>
+                        <label class="file-op-card" for="check-file-op-chunk">
+                            <input type="checkbox" id="check-file-op-chunk" value="chunk" checked />
+                            <div>
+                                <div class="file-op-title">تقطیع هوشمند (Smart Chunking)</div>
+                                <div class="file-op-desc">تبدیل محتوای سند به قطعات استاندارد با حفظ کانتکست تیترهای H1-H6 و بدون برش کلمات</div>
+                            </div>
+                        </label>
+                        <label class="file-op-card" for="check-file-op-enrich">
+                            <input type="checkbox" id="check-file-op-enrich" value="metadata_enrich" checked />
+                            <div>
+                                <div class="file-op-title">غنی‌سازی متادیتا و هش‌ها</div>
+                                <div class="file-op-desc">محاسبه اثرانگشت SHA-256، آمار کلمات، دسته‌بندی و الصاق مهرموم زمانی به هر رکورد</div>
+                            </div>
+                        </label>
+                    </div>
+
+                    <!-- Configuration Parameters Grid -->
+                    <div class="form-grid-3">
+                        <div class="form-group-rounded">
+                            <label for="select-file-chunk-strategy" class="form-label-rounded">استراتژی تقطیع:</label>
+                            <select id="select-file-chunk-strategy" class="form-control">
+                                <option value="auto" selected>انتخاب خودکار (Auto) — هوشمند</option>
+                                <option value="semantic_heading">عنوان معنایی (Semantic Heading)</option>
+                                <option value="paragraph">پاراگراف طبیعی (Paragraph)</option>
+                                <option value="sentence">جمله (Sentence)</option>
+                                <option value="fixed_size">اندازه ثابت (Fixed Size)</option>
+                            </select>
+                        </div>
+                        <div class="form-group-rounded">
+                            <label for="input-file-chunk-size" class="form-label-rounded">اندازه قطعه (کاراکتر):</label>
+                            <input type="number" id="input-file-chunk-size" class="form-control" value="1000" min="100" max="8000" step="50" />
+                        </div>
+                        <div class="form-group-rounded">
+                            <label for="input-file-chunk-overlap" class="form-label-rounded">همپوشانی (Overlap):</label>
+                            <input type="number" id="input-file-chunk-overlap" class="form-control" value="150" min="0" max="500" step="25" />
+                        </div>
+                    </div>
+
+                    <div class="form-grid-2" style="margin-top: 0.75rem;">
+                        <div class="form-group-rounded">
+                            <label for="input-file-category" class="form-label-rounded">دسته‌بندی (اختیاری):</label>
+                            <input type="text" id="input-file-category" class="form-control" placeholder="مثال: documentation, faq, policy" />
+                        </div>
+                        <div class="form-group-rounded">
+                            <label for="select-file-output-format" class="form-label-rounded">فرمت فایل خروجی:</label>
+                            <select id="select-file-output-format" class="form-control">
+                                <option value="json" selected>JSON ساختاریافته (.json)</option>
+                                <option value="jsonl">JSON Lines (.jsonl)</option>
+                                <option value="md">Markdown (.md)</option>
+                                <option value="csv">CSV (.csv)</option>
+                                <option value="txt">متن ساده (.txt)</option>
+                            </select>
+                        </div>
+                    </div>
+
+                    <!-- Run Process Button -->
+                    <div style="margin-top: 1.25rem;">
+                        <button type="button" class="btn btn-primary btn-block" id="btn-run-file-process" disabled>
+                            <i class="fa-solid fa-play"></i>
+                            <span>اجرای فرآیند پردازش خط لوله (Run Pipeline)</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Results, Telemetry & Diff Preview Card (Initially Hidden) -->
+            <div class="card file-results-card hidden" id="file-results-panel">
+                <div class="card-header-compact">
+                    <div class="card-title-group">
+                        <div class="title-icon-box">
+                            <i class="fa-solid fa-square-poll-vertical title-icon"></i>
+                        </div>
+                        <div>
+                            <h2>نتایج و پیش‌نمایش خروجی پردازش</h2>
+                            <span class="card-subtitle">آمار کمی، پیش‌نمایش خروجی تمیزشده و مقایسه تغییرات خط به خط</span>
+                        </div>
+                    </div>
+                    <div class="preview-toolbar-actions">
+                        <a href="#" class="btn btn-success btn-sm" id="btn-download-file-result" download>
+                            <i class="fa-solid fa-download"></i>
+                            <span>دانلود فایل خروجی</span>
+                        </a>
+                    </div>
+                </div>
+
+                <div class="card-body-compact">
+                    <!-- Telemetry Metric Row -->
+                    <div class="file-telemetry-row">
+                        <div class="file-telemetry-card">
+                            <div class="file-telemetry-num" id="stat-file-records-in">0</div>
+                            <div class="file-telemetry-label">رکوردهای ورودی</div>
+                        </div>
+                        <div class="file-telemetry-card">
+                            <div class="file-telemetry-num" id="stat-file-records-out">0</div>
+                            <div class="file-telemetry-label">رکوردهای خروجی</div>
+                        </div>
+                        <div class="file-telemetry-card">
+                            <div class="file-telemetry-num" id="stat-file-chunks">0</div>
+                            <div class="file-telemetry-label">قطعات چانک</div>
+                        </div>
+                        <div class="file-telemetry-card">
+                            <div class="file-telemetry-num" id="stat-file-fixes">0</div>
+                            <div class="file-telemetry-label">اصلاحات نگارشی</div>
+                        </div>
+                        <div class="file-telemetry-card">
+                            <div class="file-telemetry-num" id="stat-file-duration">0s</div>
+                            <div class="file-telemetry-label">زمان پردازش</div>
+                        </div>
+                    </div>
+
+                    <!-- Tabbed Preview Box (Output vs Diff) -->
+                    <div class="ai-preview-tabs" style="margin-top: 1rem;">
+                        <button type="button" class="btn btn-sm btn-outline active" id="tab-file-preview-output"><i class="fa-solid fa-file-code"></i> پیش‌نمایش خروجی نهایی</button>
+                        <button type="button" class="btn btn-sm btn-outline" id="tab-file-preview-diff"><i class="fa-solid fa-code-compare"></i> مقایسه تغییرات (Diff)</button>
+                    </div>
+                    <div class="ai-preview-content">
+                        <pre class="ai-preview-code" id="file-preview-output-content">// خروجی نهایی پردازش شده در این بخش نمایش داده می‌شود...</pre>
+                        <pre class="diff-view-code hidden" id="file-preview-diff-content">// مقایسه تغییرات...</pre>
                     </div>
                 </div>
             </div>

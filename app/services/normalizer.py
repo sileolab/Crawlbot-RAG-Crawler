@@ -3,12 +3,14 @@
 Provides deterministic, production-grade text normalization tailored for Persian
 and multilingual NLP/RAG pipelines with strict safety boundaries:
 1. Unicode NFC normalization.
-2. Safe unification of Arabic characters (ي/ی, ك/ک, ة/ه).
-3. Stripping invalid/invisible control characters while protecting structural ZWNJ (\\u200c).
-4. Whitespace cleanup (tabs, duplicate spaces, carriage returns, trailing whitespace).
-5. Persian compound words and affix ZWNJ correction (e.g., حل نمیشود -> حل نمی‌شود, دادهها -> داده‌ها, بهصورت -> به‌صورت).
-6. Complete protection of fenced code blocks, inline code, URLs, emails, and JSON.
-7. Pure idempotency: normalize(normalize(text)) == normalize(text).
+2. Controlled unification of Arabic characters (ي/ی, ك/ک, ى/ی) while strictly preserving ة (Teh Marbuta).
+3. Independent Arabic-to-Persian digit unification (٠-٩ -> ۰-۹) via unify_digits.
+4. Stripping invalid/invisible control characters while protecting structural ZWNJ (\\u200c) and line breaks.
+5. Whitespace and layout cleanup (tabs, multi-spaces, carriage returns, trailing whitespace) preserving linebreaks.
+6. Persian affix and compound word ZWNJ restoration (e.g., حل نمیشود -> حل نمی‌شود, دادهها -> داده‌ها, بهصورت -> به‌صورت).
+7. Comprehensive protection of code blocks, inline code, URLs (with balanced parens and trailing punctuation trimming), emails, Markdown links, and HTML tags.
+8. Mathematically verified pure idempotency: normalize(normalize(text)) == normalize(text).
+9. Accurate telemetry reporting (chars_before, chars_after, arabic_unifications, digits_unified, controls_removed, zwnj_fixes, changed, is_idempotent).
 """
 
 from __future__ import annotations
@@ -16,6 +18,7 @@ from __future__ import annotations
 import logging
 import re
 import unicodedata
+import uuid
 from typing import Any, Final, Optional
 
 logger = logging.getLogger(__name__)
@@ -24,17 +27,15 @@ logger = logging.getLogger(__name__)
 ZWNJ: Final[str] = "\u200c"
 
 # Characters and mappings
-_ARABIC_TO_PERSIAN_CHARS = {
+# NOTE: ة (\u0629) is intentionally NOT converted to ه (\u0647) globally
+# to preserve valid Arabic quotations, names, and loanwords per specifications.
+_ARABIC_TO_PERSIAN_CHARS: Final[dict[str, str]] = {
     "\u0643": "\u06a9",  # Arabic Kaf ك -> Persian Kaf ک
     "\u064a": "\u06cc",  # Arabic Yeh ي -> Persian Yeh ی
     "\u0649": "\u06cc",  # Arabic Alef Maksura ى -> Persian Yeh ی
-    "\u0629": "\u0647",  # Arabic Teh Marbuta ة -> Persian Heh ه
-    "\u064b": "\u064b",  # Tanwin Fathah (preserve)
-    "\u064c": "\u064c",  # Tanwin Dammah
-    "\u064d": "\u064d",  # Tanwin Kasrah
 }
 
-_ARABIC_DIGITS_TO_PERSIAN = {
+_ARABIC_DIGITS_TO_PERSIAN: Final[dict[str, str]] = {
     "\u0660": "\u06f0",  # ٠ -> ۰
     "\u0661": "\u06f1",  # ١ -> ۱
     "\u0662": "\u06f2",  # ٢ -> ۲
@@ -48,64 +49,115 @@ _ARABIC_DIGITS_TO_PERSIAN = {
 }
 
 # Regex to detect Persian script characters
-_PERSIAN_CHAR_RE = re.compile(r"[\u0600-\u06FF\uFB50-\uFDFF\uFE70-\uFEFF]")
+_PERSIAN_CHAR_RE: Final[re.Pattern[str]] = re.compile(
+    r"[\u0600-\u06FF\uFB50-\uFDFF\uFE70-\uFEFF]"
+)
 
-# Patterns for content protection (fenced code, inline code, URLs, emails)
-_CODE_BLOCK_RE = re.compile(r"```[\s\S]*?```")
-_INLINE_CODE_RE = re.compile(r"`[^`\n]+`")
-_URL_RE = re.compile(r"https?://[^\s<>\"']+|www\.[^\s<>\"']+", re.IGNORECASE)
-_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b")
+# Persian letter class covering standard Persian and Arabic characters
+_PERSIAN_LETTER_CLASS: Final[str] = r"[آ-یء]"
 
-# Invalid & invisible characters (excluding \n, \r, \t, and ZWNJ \u200c)
-_INVALID_CONTROLS_RE = re.compile(
+# Invalid & invisible characters to strip (excluding \n, \r, \t, and ZWNJ \u200c)
+_INVALID_CONTROLS_RE: Final[re.Pattern[str]] = re.compile(
     r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f-\x9f\u200b\u200d\u200e\u200f\ufeff\u00ad]"
 )
 
-# Common Persian verb stems for progressive prefixes (می / نمی)
-_PERSIAN_VERB_STEMS = (
-    "شود|شوند|شوی|شویم|شوید|"
-    "گردد|گردند|گردی|گردیم|گردید|"
-    "کند|کنند|کنی|کنیم|کنید|کرد|کردند|کردی|کردیم|کردید|"
-    "تواند|توانند|توانی|توانیم|توانید|"
-    "داند|دانند|دانی|دانیم|دانید|"
-    "رسد|رسند|رسی|رسیم|رسید|"
-    "بیند|بینند|بینی|بینیم|بینید|"
-    "گوید|گویند|گویی|گوییم|گویید|"
-    "رود|روند|روی|رویم|روید|"
-    "زند|زنند|زنی|زنیم|زنید|زد|زدند|"
-    "نهد|نهند|نهی|نهیم|نهید|"
-    "خواند|خوانند|خوانی|خوانیم|خوانید|"
-    "نویسد|نویسند|نویسی|نویسیم|نویسید|"
-    "خواهد|خواهند|خواهی|خواهیم|خواهید|"
-    "باشد|باشند|باشی|باشیم|باشید|"
-    "ماند|مانند|مانی|مانیم|مانید|"
-    "یابد|یابند|یابی|یابیم|یابید|"
-    "شنود|شنوند|شنوی|شنویم|شنوید|"
-    "افتد|افتند|افتی|افتیم|افتید|"
-    "گذارد|گذارند|گذاری|گذاریم|گذارید|"
-    "گزارد|گزارند|گزاری|گزاریم|گزارید|"
-    "خیزد|خیزند|خیزی|خیزیم|خیزید|"
-    "کشد|کشند|کشی|کشیم|کشید|"
-    "برد|برند|بری|بریم|برید|"
-    "پیوندد|پیوندند|بندد|بندند|"
-    "گذرد|گذرند|گذری|گذریم|گذرید|"
-    "شناسد|شناسند|شناسی|شناسیم|شناسید|"
-    "پوشد|پوشند|پوشی|پوشیم|پوشید|"
-    "ریزد|ریزند|ریزی|ریزیم|ریزید|"
-    "سازد|سازند|سازی|سازیم|سازید|"
-    "سنجد|سنجند|سنجی|سنجیم|سنجید|"
-    "شمارد|شمارند|شماری|شماریم|شمارید|"
-    "فروشد|فروشند|فروشی|فروشیم|فروشید|"
-    "فهمد|فهمند|فهمی|فهمیم|فهمید|"
-    "کوبد|کوبند|کوبی|کوبیم|کوبید|"
-    "گیرد|گیرند|گیری|گیریم|گیرید|"
-    "وزد|وزند|وزی|وزیم|وزید|"
-    "آورد|آورند|آوری|آوریم|آورید|آرد|آرند|"
-    "آید|آیند|آیی|آییم|آیید"
-)
+# Common Persian root words that start with 'می' or 'نمی' and must NEVER be broken by prefix rules
+_ROOT_WORDS_WITH_MI: Final[frozenset[str]] = frozenset({
+    "میوه", "میوه‌ها", "میوهها", "میوه‌ای", "میوه‌جات",
+    "میدان", "میدان‌ها", "میدانها", "میدانی",
+    "میهن", "میهن‌پرست", "میهنی",
+    "میزان", "میزان‌الحراره", "میزانی",
+    "میلاد", "میلادی",
+    "میعاد", "میعادی",
+    "مینو", "مینوی",
+    "میانه", "میانی", "میانهرو", "میانه‌رو",
+    "میراث", "میراث‌دار",
+    "میکروب", "میکروبی",
+    "میکروفون",
+    "مینیاتور", "مینیاتوری",
+    "میلیارد", "میلیاردر", "میلیاردی",
+    "میلیون", "میلیونر", "میلیونی",
+    "میلیمتر", "میلی‌متر",
+    "میز", "میزها", "میزی",
+    "میله", "میله‌ها",
+    "میخ", "میخ‌ها",
+    "میش", "میش‌ها",
+    "نمی",
+})
+
+# Words ending in 'ها' that are root nouns or non-plurals and must NOT have ZWNJ inserted
+_NON_PLURAL_HA_WORDS: Final[frozenset[str]] = frozenset({
+    "تنها", "انتها", "اشتها", "رها", "بها", "سها", "طاها", "ابها", "زها", "دها", "مهیا"
+})
+
+# Words ending in 'تر' that are roots and must NOT be broken by comparative adjective rules
+_NON_COMPARATIVE_TAR_WORDS: Final[frozenset[str]] = frozenset({
+    "دختر", "دفتر", "اختر", "انگشتر", "خاکستر", "کبوتر", "شتر", "بستر", "استر",
+    "ستر", "سنتر", "لیتر", "میلیمتر", "سانتیمتر", "کیلومتر", "متر", "قطر", "وتر",
+    "تویتر", "توییتر", "چارتر", "تئاتر", "ارکستر", "مانستر", "پوستر", "کاستر",
+    "بهتر", "بیشتر", "کمتر"
+})
 
 
-_NON_PLURAL_HA_WORDS = frozenset({"تنها", "انتها", "اشتها", "رها", "بها", "سها", "طاها", "ابها", "زها", "دها"})
+def _build_verb_stems_regex() -> str:
+    """Compile comprehensive Persian verb stems across 6 personal conjugations and past forms."""
+    present_roots = [
+        "شو", "گرد", "کن", "توان", "دان", "رس", "بین", "گو", "رو", "زن", "نه",
+        "خوان", "نویس", "خواه", "باش", "مان", "یاب", "شنو", "افت", "گذار", "گزار",
+        "خیز", "کش", "بر", "پیوند", "بند", "گذر", "شناس", "پوش", "ریز", "ساز",
+        "سنج", "شمار", "فروش", "فهم", "کوب", "گیر", "وز", "آور", "آر", "آی",
+        "دار", "ده", "پرس", "خر", "چسب", "پاش", "افزای", "کاه", "تاب", "لرز", "سوز",
+    ]
+    endings = ["م", "ی", "د", "یم", "ید", "ند"]
+    stems: set[str] = set()
+
+    for r in present_roots:
+        for e in endings:
+            stems.add(r + e)
+
+    past_roots = [
+        "کرد", "شد", "رفت", "گفت", "آمد", "آورد", "دید", "داد", "داشت", "زد",
+        "گرفت", "توانست", "گذاشت", "گذشت", "نوشت", "خواند", "ساخت", "سوخت",
+        "ریخت", "فهمید", "بخشید", "پوشید", "کشید", "رسید", "پرسید", "شنید",
+        "برید", "پذیرفت", "بست", "خرید", "فروخت", "افتاد", "چسبید", "خوابید", "پرید",
+    ]
+    for pr in past_roots:
+        for e in ["م", "ی", "", "یم", "ید", "ند"]:
+            stems.add(pr + e)
+
+    return "|".join(sorted(stems, key=len, reverse=True))
+
+
+_PERSIAN_VERB_STEMS: Final[str] = _build_verb_stems_regex()
+_PLURAL_SUFFIXES: Final[str] = r"(?:ها|های|هایی|هایم|هایت|هایش|هایمان|هایتان|هایشان)"
+_COMPARATIVE_SUFFIXES: Final[str] = r"(?:تر|ترین|ترها|ترهای|ترهایی)"
+
+
+def _clean_url_match(url: str) -> tuple[str, str]:
+    """Trim trailing punctuation that belongs to prose, respecting balanced parens."""
+    trailing = ""
+    strip_chars = ".,:;!?؟،؛"
+
+    while url:
+        if url[-1] in strip_chars:
+            trailing = url[-1] + trailing
+            url = url[:-1]
+        elif url[-1] == ")":
+            if url.count("(") < url.count(")"):
+                trailing = url[-1] + trailing
+                url = url[:-1]
+            else:
+                break
+        elif url[-1] == "]":
+            if url.count("[") < url.count("]"):
+                trailing = url[-1] + trailing
+                url = url[:-1]
+            else:
+                break
+        else:
+            break
+
+    return url, trailing
 
 
 class PersianNormalizer:
@@ -125,12 +177,12 @@ class PersianNormalizer:
 
         Args:
             nfc: Apply Unicode NFC composition.
-            unify_arabic: Convert Arabic kaf/yeh/teh-marbuta to Persian equivalents.
-            unify_digits: Convert Arabic digits (0-9) to Persian digits.
+            unify_arabic: Convert Arabic kaf/yeh/alef-maksura to Persian equivalents (preserves Teh Marbuta).
+            unify_digits: Convert Arabic digits (٠-٩) to Persian digits (۰-۹).
             clean_controls: Remove invisible/corrupting control characters.
             fix_spacing: Normalize multi-spaces, tabs, linebreaks.
-            fix_zwnj_affixes: Correct spacing for prefixes (می/نمی) and suffixes (ها/تر/ترین/مند/شناس).
-            protect_code_and_urls: Prevent modifying codeblocks, inline code, URLs, and emails.
+            fix_zwnj_affixes: Correct spacing for prefixes (می/نمی) and suffixes (ها/تر/ترین/ترکیب‌ها).
+            protect_code_and_urls: Prevent modifying codeblocks, inline code, URLs, emails, and Markdown links.
         """
         self.nfc = nfc
         self.unify_arabic = unify_arabic
@@ -142,36 +194,56 @@ class PersianNormalizer:
 
         # Compile affixes patterns
         self._prefix_pattern = re.compile(rf"\b(ن?می)\s*({_PERSIAN_VERB_STEMS})\b")
-        self._plural_glued_pattern = re.compile(rf"\b([آ-ی]{{2,}})(ها|های|هایی|هایمان|هایتان|هایشان)\b")
-        self._plural_space_pattern = re.compile(rf"(\b[آ-ی]{{2,}}) (ها|های|هایمان|هایتان|هایشان)\b")
-        self._comparative_space_pattern = re.compile(rf"(\b[آ-ی]{{2,}}) (تر|ترین)\b")
-        self._comparative_glued_pattern = re.compile(rf"(\b[آ-ی]{{2,}}ه)تر(ین)?\b")
+        self._plural_glued_pattern = re.compile(rf"\b({_PERSIAN_LETTER_CLASS}{{2,}})({_PLURAL_SUFFIXES})\b")
+        self._plural_space_pattern = re.compile(rf"\b({_PERSIAN_LETTER_CLASS}{{2,}}) +({_PLURAL_SUFFIXES})\b")
+        self._comparative_glued_pattern = re.compile(rf"\b({_PERSIAN_LETTER_CLASS}{{3,}})({_COMPARATIVE_SUFFIXES})\b")
+        self._comparative_space_pattern = re.compile(rf"\b({_PERSIAN_LETTER_CLASS}{{2,}}) +({_COMPARATIVE_SUFFIXES})\b")
 
         # Specific compound words from prompt requirements
         self._known_compounds = [
-            (re.compile(r"\bبهصورت\b"), f"به{ZWNJ}صورت"),
-            (re.compile(r"\bبه صورت\b"), f"به{ZWNJ}صورت"),
-            (re.compile(r"\bفارسیزبان\b"), f"فارسی{ZWNJ}زبان"),
-            (re.compile(r"\bفارسی زبان\b"), f"فارسی{ZWNJ}زبان"),
-            (re.compile(r"\bانگلیسیزبان\b"), f"انگلیسی{ZWNJ}زبان"),
-            (re.compile(r"\bهمینطور\b"), f"همین{ZWNJ}طور"),
-            (re.compile(r"\bاینطور\b"), f"این{ZWNJ}طور"),
-            (re.compile(r"\bبهره مند\b"), f"بهره{ZWNJ}مند"),
-            (re.compile(r"\bعلاقه مند\b"), f"علاقه{ZWNJ}مند"),
-            (re.compile(r"\bزبان شناسی\b"), f"زبان{ZWNJ}شناسی"),
-            (re.compile(r"\bروان شناسی\b"), f"روان{ZWNJ}شناسی"),
+            (re.compile(r"\bبه(?:[ \t]+|)عنوان\b"), f"به{ZWNJ}عنوان"),
+            (re.compile(r"\bبه(?:[ \t]+|)صورت\b"), f"به{ZWNJ}صورت"),
+            (re.compile(r"\bفارسی(?:[ \t]+|)زبان(ان|ها|های)?\b"), rf"فارسی{ZWNJ}زبان\1"),
+            (re.compile(r"\bانگلیسی(?:[ \t]+|)زبان(ان|ها|های)?\b"), rf"انگلیسی{ZWNJ}زبان\1"),
+            (re.compile(r"\bبهره(?:[ \t]+|)مند(ی|ان|ها|ند)?\b"), rf"بهره{ZWNJ}مند\1"),
+            (re.compile(r"\bعلاقه(?:[ \t]+|)مند(ی|ان|ها|ند)?\b"), rf"علاقه{ZWNJ}مند\1"),
+            (re.compile(r"\bزبان(?:[ \t]+|)شناس(ی|ان|ها)?\b"), rf"زبان{ZWNJ}شناس\1"),
+            (re.compile(r"\bروان(?:[ \t]+|)شناس(ی|ان|ها)?\b"), rf"روان{ZWNJ}شناس\1"),
+            (re.compile(r"\bآماده(?:[ \t]+|)سازی(ها|های)?\b"), rf"آماده{ZWNJ}سازی\1"),
+            (re.compile(r"\bنفرت(?:[ \t]+|)پراکن(ی|ها)?\b"), rf"نفرت{ZWNJ}پراکن\1"),
+            (re.compile(r"\bهمین(?:[ \t]+|)طور\b"), f"همین{ZWNJ}طور"),
+            (re.compile(r"\bاین(?:[ \t]+|)طور\b"), f"این{ZWNJ}طور"),
         ]
 
-    def normalize(self, text: str) -> str:
+    def normalize(self, text: Optional[str]) -> str:
         """Normalize text according to configured rules."""
+        if text is None:
+            return ""
+        if not isinstance(text, str):
+            raise TypeError(f"Expected str, got {type(text).__name__}")
         result, _ = self._normalize_pipeline(text)
         return result
 
-    def normalize_with_report(self, text: str) -> tuple[str, dict[str, Any]]:
+    def normalize_with_report(self, text: Optional[str]) -> tuple[str, dict[str, Any]]:
         """Normalize text and return detailed telemetry report of changes."""
+        if text is None:
+            return "", {
+                "chars_before": 0,
+                "chars_after": 0,
+                "arabic_unifications": 0,
+                "digits_unified": 0,
+                "controls_removed": 0,
+                "zwnj_fixes": 0,
+                "changed": False,
+                "is_idempotent": True,
+            }
+        if not isinstance(text, str):
+            raise TypeError(f"Expected str, got {type(text).__name__}")
+
         first_pass, report = self._normalize_pipeline(text)
         second_pass, _ = self._normalize_pipeline(first_pass)
         report["is_idempotent"] = (first_pass == second_pass)
+        report["changed"] = (first_pass != text)
         return first_pass, report
 
     def _normalize_pipeline(self, text: str) -> tuple[str, dict[str, Any]]:
@@ -181,17 +253,23 @@ class PersianNormalizer:
                 "chars_before": 0,
                 "chars_after": 0,
                 "arabic_unifications": 0,
+                "digits_unified": 0,
                 "controls_removed": 0,
                 "zwnj_fixes": 0,
+                "changed": False,
                 "is_idempotent": True,
             }
 
         chars_before = len(text)
         report: dict[str, Any] = {
             "chars_before": chars_before,
+            "chars_after": 0,
             "arabic_unifications": 0,
+            "digits_unified": 0,
             "controls_removed": 0,
             "zwnj_fixes": 0,
+            "changed": False,
+            "is_idempotent": True,
         }
 
         # 1. Mask protected blocks if requested
@@ -206,38 +284,46 @@ class PersianNormalizer:
 
         # 3. Strip invalid control characters while preserving ZWNJ and line breaks
         if self.clean_controls:
-            prev_len = len(masked_text)
+            control_matches = len(_INVALID_CONTROLS_RE.findall(masked_text))
             masked_text = _INVALID_CONTROLS_RE.sub("", masked_text)
+            report["controls_removed"] = control_matches
+
             # Normalize redundant ZWNJ
             masked_text = re.sub(f"{ZWNJ}+", ZWNJ, masked_text)
-            # Remove ZWNJ at word edges or near spaces
-            masked_text = re.sub(f"\\s+{ZWNJ}", " ", masked_text)
-            masked_text = re.sub(f"{ZWNJ}+\\s+", " ", masked_text)
-            report["controls_removed"] = max(0, prev_len - len(masked_text))
+            # Remove ZWNJ immediately adjacent to horizontal spaces
+            masked_text = re.sub(rf"[ \t\f\v]+{ZWNJ}", " ", masked_text)
+            masked_text = re.sub(rf"{ZWNJ}[ \t\f\v]+", " ", masked_text)
+            # Remove leading/trailing ZWNJ from lines
+            masked_text = re.sub(rf"(^|\n){ZWNJ}+", r"\1", masked_text)
+            masked_text = re.sub(rf"{ZWNJ}+($|\n)", r"\1", masked_text)
 
-        # 4. Unify Arabic characters if enabled
-        if self.unify_arabic:
-            unify_count = 0
-            chars_list = []
+        # 4. Unify Arabic characters if enabled (preserves Teh Marbuta ة)
+        if self.unify_arabic or self.unify_digits:
+            arabic_unify_count = 0
+            digits_unify_count = 0
+            chars_list: list[str] = []
+
             for ch in masked_text:
-                if ch in _ARABIC_TO_PERSIAN_CHARS:
+                if self.unify_arabic and ch in _ARABIC_TO_PERSIAN_CHARS:
                     chars_list.append(_ARABIC_TO_PERSIAN_CHARS[ch])
-                    unify_count += 1
+                    arabic_unify_count += 1
                 elif self.unify_digits and ch in _ARABIC_DIGITS_TO_PERSIAN:
                     chars_list.append(_ARABIC_DIGITS_TO_PERSIAN[ch])
-                    unify_count += 1
+                    digits_unify_count += 1
                 else:
                     chars_list.append(ch)
+
             masked_text = "".join(chars_list)
-            report["arabic_unifications"] = unify_count
+            report["arabic_unifications"] = arabic_unify_count
+            report["digits_unified"] = digits_unify_count
 
         # 5. Spacing & Whitespace cleanup
         if self.fix_spacing:
-            # Normalize linebreaks
+            # Normalize carriage returns to standard line breaks
             masked_text = masked_text.replace("\r\n", "\n").replace("\r", "\n")
             # Collapse horizontal tabs and spaces
             masked_text = re.sub(r"[ \t\f\v]+", " ", masked_text)
-            # Strip trailing space on lines
+            # Strip trailing/leading spaces on lines
             masked_text = re.sub(r" +\n", "\n", masked_text)
             masked_text = re.sub(r"\n +", "\n", masked_text)
             # Limit consecutive newlines to maximum 2 (paragraph break)
@@ -250,8 +336,14 @@ class PersianNormalizer:
             # Progressive verb prefixes: می / نمی (both glued and spaced)
             def repl_prefix(m: re.Match) -> str:
                 nonlocal zwnj_fix_count
-                zwnj_fix_count += 1
-                return f"{m.group(1)}{ZWNJ}{m.group(2)}"
+                full_w = m.group(0)
+                clean_w = full_w.replace(ZWNJ, "").strip()
+                if clean_w in _ROOT_WORDS_WITH_MI:
+                    return full_w
+                target = f"{m.group(1)}{ZWNJ}{m.group(2)}"
+                if target != full_w:
+                    zwnj_fix_count += 1
+                return target
 
             masked_text = self._prefix_pattern.sub(repl_prefix, masked_text)
 
@@ -259,42 +351,62 @@ class PersianNormalizer:
             def repl_plural_glued(m: re.Match) -> str:
                 nonlocal zwnj_fix_count
                 word = m.group(0)
-                if word in _NON_PLURAL_HA_WORDS:
+                stem = m.group(1)
+                suffix = m.group(2)
+                if word in _NON_PLURAL_HA_WORDS or stem in _NON_PLURAL_HA_WORDS:
                     return word
-                zwnj_fix_count += 1
-                return f"{m.group(1)}{ZWNJ}{m.group(2)}"
+                target = f"{stem}{ZWNJ}{suffix}"
+                if target != word:
+                    zwnj_fix_count += 1
+                return target
 
             masked_text = self._plural_glued_pattern.sub(repl_plural_glued, masked_text)
 
             # Spaced plurals (e.g., کتاب ها -> کتاب‌ها)
             def repl_plural_space(m: re.Match) -> str:
                 nonlocal zwnj_fix_count
-                zwnj_fix_count += 1
-                return f"{m.group(1)}{ZWNJ}{m.group(2)}"
+                target = f"{m.group(1)}{ZWNJ}{m.group(2)}"
+                if target != m.group(0):
+                    zwnj_fix_count += 1
+                return target
 
             masked_text = self._plural_space_pattern.sub(repl_plural_space, masked_text)
 
-            # Comparatives (e.g., ساده تر -> ساده‌تر, سادهتر -> ساده‌تر)
+            # Comparatives (e.g., ساده تر -> ساده‌تر, روشنتر -> روشن‌تر)
             def repl_comp_space(m: re.Match) -> str:
                 nonlocal zwnj_fix_count
-                zwnj_fix_count += 1
-                return f"{m.group(1)}{ZWNJ}{m.group(2)}"
+                target = f"{m.group(1)}{ZWNJ}{m.group(2)}"
+                if target != m.group(0):
+                    zwnj_fix_count += 1
+                return target
 
             masked_text = self._comparative_space_pattern.sub(repl_comp_space, masked_text)
 
             def repl_comp_glued(m: re.Match) -> str:
                 nonlocal zwnj_fix_count
-                zwnj_fix_count += 1
-                suffix = f"تر{m.group(2)}" if m.group(2) else "تر"
-                return f"{m.group(1)}{ZWNJ}{suffix}"
+                word = m.group(0)
+                stem = m.group(1)
+                suffix = m.group(2)
+                if word in _NON_COMPARATIVE_TAR_WORDS:
+                    return word
+                target = f"{stem}{ZWNJ}{suffix}"
+                if target != word:
+                    zwnj_fix_count += 1
+                return target
 
             masked_text = self._comparative_glued_pattern.sub(repl_comp_glued, masked_text)
 
             # Specific known compound words
             for pattern, replacement in self._known_compounds:
+                def repl_compound(m: re.Match, rpl=replacement) -> str:
+                    nonlocal zwnj_fix_count
+                    expanded = m.expand(rpl)
+                    if expanded != m.group(0):
+                        zwnj_fix_count += 1
+                    return expanded
+
                 if pattern.search(masked_text):
-                    masked_text = pattern.sub(replacement, masked_text)
-                    zwnj_fix_count += 1
+                    masked_text = pattern.sub(repl_compound, masked_text)
 
             report["zwnj_fixes"] = zwnj_fix_count
 
@@ -304,25 +416,50 @@ class PersianNormalizer:
 
         final_text = masked_text.strip()
         report["chars_after"] = len(final_text)
+        report["changed"] = (final_text != text)
         return final_text, report
 
     def _protect_tokens(self, text: str) -> tuple[str, dict[str, str]]:
-        """Protect sensitive code blocks, URLs, and emails with placeholders."""
+        """Protect sensitive code blocks, URLs, emails, Markdown links, and HTML tags."""
         placeholders: dict[str, str] = {}
         counter = 0
+        nonce = uuid.uuid4().hex[:8]
 
-        def repl(m: re.Match) -> str:
+        def make_token(val: str) -> str:
             nonlocal counter
-            token = f"«__NORM_GUARD_{counter}__»"
-            placeholders[token] = m.group(0)
+            token = f"«__{nonce}_GUARD_{counter}__»"
+            placeholders[token] = val
             counter += 1
             return token
 
-        # Order: fenced code, inline code, URLs, emails
-        text = _CODE_BLOCK_RE.sub(repl, text)
-        text = _INLINE_CODE_RE.sub(repl, text)
-        text = _URL_RE.sub(repl, text)
-        text = _EMAIL_RE.sub(repl, text)
+        # 1. Fenced code blocks
+        text = re.sub(r"```[\s\S]*?```", lambda m: make_token(m.group(0)), text)
+
+        # 2. Inline code
+        text = re.sub(r"`[^`\n]+`", lambda m: make_token(m.group(0)), text)
+
+        # 3. HTML tags
+        text = re.sub(r"</?[a-zA-Z][a-zA-Z0-9]*(?:\s+[^>]*)?>", lambda m: make_token(m.group(0)), text)
+
+        # 4. Markdown links: protect destination URL while keeping anchor text normalizable
+        def repl_md_link(m: re.Match) -> str:
+            anchor = m.group(1)
+            dest = m.group(2)
+            return f"[{anchor}]({make_token(dest)})"
+
+        text = re.sub(r"\[([^\]\n]+)\]\(((?:https?://|www\.|/)[^\s)]+)\)", repl_md_link, text)
+
+        # 5. Email addresses
+        text = re.sub(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", lambda m: make_token(m.group(0)), text)
+
+        # 6. Standalone URLs: protect while trimming trailing prose punctuation
+        def repl_url(m: re.Match) -> str:
+            raw_url = m.group(0)
+            clean_u, trailing = _clean_url_match(raw_url)
+            return make_token(clean_u) + trailing
+
+        text = re.sub(r"(?:https?://|www\.)[^\s<>\"\'\)]+", repl_url, text)
+
         return text, placeholders
 
     def _restore_tokens(self, text: str, placeholders: dict[str, str]) -> str:

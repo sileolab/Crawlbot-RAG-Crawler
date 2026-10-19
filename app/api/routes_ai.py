@@ -148,10 +148,12 @@ async def chunk_documents(request: dict[str, Any]) -> ApiResponse:
         )
 
     try:
+        normalize = bool(request.get("normalize", False))
         chunker = ChunkerService(
             strategy=strategy,
             chunk_size=chunk_size,
             overlap=overlap,
+            normalize=normalize,
         )
         # Filter only successfully extracted docs with content
         eligible = [d for d in documents if d.has_content]

@@ -23,6 +23,7 @@ from typing import Optional
 
 from ..schemas.chunks import ChunkingResult, ChunkingStrategy, DocumentChunk
 from ..schemas.documents import ExtractedDocument
+from .normalizer import PersianNormalizer
 
 logger = logging.getLogger(__name__)
 
@@ -529,6 +530,8 @@ class ChunkerService:
         strategy: str = "auto",
         chunk_size: int = 1000,
         overlap: int = 150,
+        normalize: bool = False,
+        normalizer: Optional[PersianNormalizer] = None,
     ) -> None:
         """Initialize the chunker.
 
@@ -536,6 +539,8 @@ class ChunkerService:
             strategy: Splitting strategy name ('auto', 'semantic_heading', 'paragraph', 'sentence', 'fixed_size').
             chunk_size: Target chunk size in characters (min 50).
             overlap: Number of characters to repeat at the start of each new chunk.
+            normalize: Whether to apply Persian & Unicode normalization prior to chunking.
+            normalizer: Optional custom PersianNormalizer instance.
 
         Raises:
             ValueError: If an unknown strategy is given.
@@ -548,6 +553,8 @@ class ChunkerService:
         self.strategy = strategy
         self.chunk_size = max(50, chunk_size)
         self.overlap = max(0, min(overlap, self.chunk_size // 2))
+        self.normalize = normalize
+        self.normalizer = normalizer
 
     # ------------------------------------------------------------------
     # Document-level chunking
@@ -569,6 +576,19 @@ class ChunkerService:
         """
         text = doc.content_markdown or doc.content_text or ""
         text = text.strip()
+
+        norm_applied = (
+            bool(doc.metadata.get("normalized", False))
+            if hasattr(doc, "metadata") and isinstance(doc.metadata, dict)
+            else False
+        )
+
+        if self.normalize:
+            active_norm = self.normalizer or PersianNormalizer()
+            norm_text, norm_rep = active_norm.normalize_with_report(text)
+            if norm_rep.get("changed", False):
+                text = norm_text
+                norm_applied = True
 
         if not text:
             logger.debug("Document %s has no content to chunk.", doc.url)
@@ -635,11 +655,6 @@ class ChunkerService:
             )
 
             q_flags = detect_chunk_quality_flags(chunk_text, heading_ctx)
-            norm_applied = (
-                bool(doc.metadata.get("normalized", False))
-                if hasattr(doc, "metadata") and isinstance(doc.metadata, dict)
-                else False
-            )
 
             dc = DocumentChunk(
                 chunk_id=chunk_id,

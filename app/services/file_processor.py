@@ -43,7 +43,9 @@ from ..core.security import sanitize_filename
 from ..schemas.chunks import ChunkingResult, DocumentChunk
 from ..schemas.documents import ExtractedDocument
 from .chunker import ChunkerService
+from .embedding_service import EmbeddingService
 from .normalizer import PersianNormalizer
+from .rag_enhancer import RAGEnhancer
 
 logger = logging.getLogger(__name__)
 
@@ -152,7 +154,7 @@ class FileProcessorService:
     # Core Pipeline & Execution
     # -----------------------------------------------------------------------
 
-    def process(
+    async def process(
         self,
         file_id: str,
         operations: list[str],
@@ -191,6 +193,7 @@ class FileProcessorService:
             "records_in": file_info["line_count"],
             "records_out": file_info["line_count"],
             "chunks_produced": 0,
+            "embedded_chunks": 0,
             "normalization_fixes": 0,
             "warnings": [],
             "operations_applied": [],
@@ -220,23 +223,38 @@ class FileProcessorService:
                 current_data, stats = self._op_json_cleanup(current_data, opts)
                 telemetry["operations_applied"].append("json_cleanup")
 
+            elif op_name == "llm_json_optimize":
+                current_data, stats = await self._op_llm_json_optimize(
+                    current_data, current_format, opts, file_info["filename"]
+                )
+                current_format = "json"
+                if stats.get("warnings"):
+                    telemetry["warnings"].extend(stats["warnings"])
+                telemetry["operations_applied"].append("llm_json_optimize")
+
             elif op_name == "chunk":
-                current_data, stats = self._op_chunk(current_data, current_format, opts)
+                current_data, stats = self._op_chunk(
+                    current_data, current_format, opts, file_info["filename"]
+                )
                 current_format = "json"
                 telemetry["chunks_produced"] = stats.get("total_chunks", 0)
                 telemetry["records_out"] = stats.get("total_chunks", 0)
                 telemetry["operations_applied"].append("chunk")
 
+            elif op_name == "embed":
+                current_data, stats = await self._op_embed(
+                    current_data, current_format, opts, file_info["filename"]
+                )
+                current_format = "json"
+                telemetry["embedded_chunks"] = stats.get("embedded_chunks", 0)
+                if stats.get("warnings"):
+                    telemetry["warnings"].extend(stats["warnings"])
+                telemetry["operations_applied"].append("embed")
+
             elif op_name == "metadata_enrich":
                 current_data, stats = self._op_metadata_enrich(current_data, opts)
                 current_format = "json"
                 telemetry["operations_applied"].append("metadata_enrich")
-
-            elif op_name == "llm_json_optimize":
-                current_data, stats = self._op_llm_json_optimize(current_data, opts)
-                if stats.get("warnings"):
-                    telemetry["warnings"].extend(stats["warnings"])
-                telemetry["operations_applied"].append("llm_json_optimize")
 
         # Prepare output artifact
         artifact_id = uuid.uuid4().hex[:12]
@@ -279,6 +297,24 @@ class FileProcessorService:
             "output_preview": output_str[:2500],
             "duration_seconds": duration_sec,
         }
+
+    def process_sync(
+        self,
+        file_id: str,
+        operations: list[str],
+        options: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        """Synchronous wrapper for process."""
+        import asyncio
+        import concurrent.futures
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    return pool.submit(asyncio.run, self.process(file_id, operations, options)).result()
+            return loop.run_until_complete(self.process(file_id, operations, options))
+        except RuntimeError:
+            return asyncio.run(self.process(file_id, operations, options))
 
     # -----------------------------------------------------------------------
     # Operation Implementations
@@ -409,71 +445,189 @@ class FileProcessorService:
 
         return cleaned, {"status": "cleaned"}
 
-    def _op_chunk(self, data: Any, fmt: str, opts: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    def _to_extracted_documents(
+        self,
+        data: Any,
+        fmt: str,
+        opts: dict[str, Any],
+        fallback_title: str = "Uploaded Document",
+    ) -> list[ExtractedDocument]:
+        """Convert input data (str, dict, list) into ExtractedDocument instances."""
+        docs: list[ExtractedDocument] = []
+
+        if isinstance(data, str):
+            if fmt == "json" or data.strip().startswith(("{", "[")):
+                try:
+                    parsed = json.loads(data)
+                    return self._to_extracted_documents(parsed, "json", opts, fallback_title)
+                except Exception:
+                    pass
+
+            doc = ExtractedDocument(
+                document_id=uuid.uuid4().hex[:12],
+                url=f"https://crawlbot.local/file/{fallback_title}",
+                source_url=f"https://crawlbot.local/file/{fallback_title}",
+                title=opts.get("doc_title") or fallback_title,
+                content_markdown=data if fmt == "md" else None,
+                content_text=data,
+                word_count=len(data.split()),
+                character_count=len(data),
+            )
+            return [doc]
+
+        elif isinstance(data, dict):
+            text = (
+                data.get("content_text")
+                or data.get("text")
+                or data.get("content")
+                or data.get("body")
+                or data.get("description")
+            )
+            if text and isinstance(text, str):
+                md = data.get("content_markdown") or (text if fmt == "md" else None)
+                title = data.get("title") or opts.get("doc_title") or fallback_title
+                doc = ExtractedDocument(
+                    document_id=str(data.get("document_id") or uuid.uuid4().hex[:12]),
+                    url=str(data.get("url") or data.get("source_url") or f"https://crawlbot.local/file/{fallback_title}"),
+                    source_url=str(data.get("source_url") or data.get("url") or f"https://crawlbot.local/file/{fallback_title}"),
+                    title=title,
+                    content_markdown=md,
+                    content_text=text,
+                    word_count=len(text.split()),
+                    character_count=len(text),
+                )
+                return [doc]
+            else:
+                dumped = json.dumps(data, ensure_ascii=False, indent=2)
+                title = data.get("title") or opts.get("doc_title") or fallback_title
+                doc = ExtractedDocument(
+                    document_id=uuid.uuid4().hex[:12],
+                    url=f"https://crawlbot.local/file/{fallback_title}",
+                    source_url=f"https://crawlbot.local/file/{fallback_title}",
+                    title=title,
+                    content_text=dumped,
+                    word_count=len(dumped.split()),
+                    character_count=len(dumped),
+                )
+                return [doc]
+
+        elif isinstance(data, list):
+            for i, item in enumerate(data):
+                if isinstance(item, dict):
+                    text = (
+                        item.get("content_text")
+                        or item.get("text")
+                        or item.get("content")
+                        or item.get("body")
+                    )
+                    if text and isinstance(text, str):
+                        md = item.get("content_markdown") or (text if fmt == "md" else None)
+                        title = item.get("title") or f"{fallback_title} - رکورد {i+1}"
+                        docs.append(
+                            ExtractedDocument(
+                                document_id=str(item.get("document_id") or uuid.uuid4().hex[:12]),
+                                url=str(item.get("url") or item.get("source_url") or f"https://crawlbot.local/file/{fallback_title}/{i+1}"),
+                                source_url=str(item.get("source_url") or item.get("url") or f"https://crawlbot.local/file/{fallback_title}/{i+1}"),
+                                title=title,
+                                content_markdown=md,
+                                content_text=text,
+                                word_count=len(text.split()),
+                                character_count=len(text),
+                            )
+                        )
+                    else:
+                        dumped = json.dumps(item, ensure_ascii=False)
+                        docs.append(
+                            ExtractedDocument(
+                                document_id=uuid.uuid4().hex[:12],
+                                url=f"https://crawlbot.local/file/{fallback_title}/{i+1}",
+                                source_url=f"https://crawlbot.local/file/{fallback_title}/{i+1}",
+                                title=item.get("title") or f"{fallback_title} - رکورد {i+1}",
+                                content_text=dumped,
+                                word_count=len(dumped.split()),
+                                character_count=len(dumped),
+                            )
+                        )
+                elif isinstance(item, str) and item.strip():
+                    docs.append(
+                        ExtractedDocument(
+                            document_id=uuid.uuid4().hex[:12],
+                            url=f"https://crawlbot.local/file/{fallback_title}/{i+1}",
+                            source_url=f"https://crawlbot.local/file/{fallback_title}/{i+1}",
+                            title=f"{fallback_title} - بخش {i+1}",
+                            content_text=item,
+                            word_count=len(item.split()),
+                            character_count=len(item),
+                        )
+                    )
+
+            if not docs:
+                text_to_chunk = "\n\n".join(
+                    [json.dumps(x, ensure_ascii=False) if isinstance(x, (dict, list)) else str(x) for x in data]
+                )
+                docs.append(
+                    ExtractedDocument(
+                        document_id=uuid.uuid4().hex[:12],
+                        url=f"https://crawlbot.local/file/{fallback_title}",
+                        source_url=f"https://crawlbot.local/file/{fallback_title}",
+                        title=fallback_title,
+                        content_text=text_to_chunk,
+                        word_count=len(text_to_chunk.split()),
+                        character_count=len(text_to_chunk),
+                    )
+                )
+            return docs
+
+        dumped = str(data)
+        return [
+            ExtractedDocument(
+                document_id=uuid.uuid4().hex[:12],
+                url=f"https://crawlbot.local/file/{fallback_title}",
+                source_url=f"https://crawlbot.local/file/{fallback_title}",
+                title=fallback_title,
+                content_text=dumped,
+                word_count=len(dumped.split()),
+                character_count=len(dumped),
+            )
+        ]
+
+    def _op_chunk(
+        self,
+        data: Any,
+        fmt: str,
+        opts: dict[str, Any],
+        fallback_title: str = "Uploaded Document",
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
         """Extract text content and apply ChunkerService to produce DocumentChunks."""
-        strategy = opts.get("chunk_strategy", "auto")
+        strategy = opts.get("chunk_strategy") or opts.get("strategy") or "auto"
         chunk_size = int(opts.get("chunk_size", 1000))
         overlap = int(opts.get("overlap", 150))
         category = opts.get("category") or None
+        normalize = bool(opts.get("normalize", False))
 
-        # Extract text/markdown from various input formats
-        if isinstance(data, str):
-            text_to_chunk = data
-            doc = ExtractedDocument(
-                url="https://crawlbot.local/file/content",
-                source_url="https://crawlbot.local/file/content",
-                title=opts.get("doc_title", "Uploaded Document"),
-                content_markdown=text_to_chunk if fmt == "md" else None,
-                content_text=text_to_chunk,
-                word_count=len(text_to_chunk.split()),
-                character_count=len(text_to_chunk),
-            )
-        elif isinstance(data, dict):
-            text_to_chunk = json.dumps(data, ensure_ascii=False, indent=2)
-            doc = ExtractedDocument(
-                url="https://crawlbot.local/file/json",
-                source_url="https://crawlbot.local/file/json",
-                title=data.get("title") or "Uploaded JSON",
-                content_text=text_to_chunk,
-                word_count=len(text_to_chunk.split()),
-                character_count=len(text_to_chunk),
-            )
-        elif isinstance(data, list):
-            # If it's a list of records or strings
-            text_to_chunk = "\n\n".join(
-                [json.dumps(x, ensure_ascii=False) if isinstance(x, (dict, list)) else str(x) for x in data]
-            )
-            doc = ExtractedDocument(
-                url="https://crawlbot.local/file/records",
-                source_url="https://crawlbot.local/file/records",
-                title="Uploaded Records",
-                content_text=text_to_chunk,
-                word_count=len(text_to_chunk.split()),
-                character_count=len(text_to_chunk),
-            )
-        else:
-            text_to_chunk = str(data)
-            doc = ExtractedDocument(
-                url="https://crawlbot.local/file/data",
-                source_url="https://crawlbot.local/file/data",
-                title="Uploaded Data",
-                content_text=text_to_chunk,
-                word_count=len(text_to_chunk.split()),
-                character_count=len(text_to_chunk),
-            )
+        docs = self._to_extracted_documents(data, fmt, opts, fallback_title)
+        eligible = [d for d in docs if d.has_content]
+        if not eligible:
+            eligible = docs
 
         chunker = ChunkerService(
             strategy=strategy,
             chunk_size=chunk_size,
             overlap=overlap,
+            normalize=normalize,
         )
-        res: ChunkingResult = chunker.chunk_document(doc, category=category)
-        serialized_chunks = [c.model_dump() for c in res.chunks]
+
+        all_chunks = chunker.chunk_documents(eligible, category=category)
+        serialized_chunks = [c.model_dump() for c in all_chunks]
+
+        applied_strategies = list({c.metadata.get("strategy") for c in all_chunks if c.metadata.get("strategy")})
+        applied_str = applied_strategies[0] if len(applied_strategies) == 1 else (", ".join(applied_strategies) if applied_strategies else strategy)
 
         return serialized_chunks, {
-            "total_chunks": res.total_chunks,
-            "strategy": res.strategy,
-            "applied_strategy": res.applied_strategy,
+            "total_chunks": len(all_chunks),
+            "strategy": strategy,
+            "applied_strategy": applied_str,
+            "total_docs_chunked": len(eligible),
         }
 
     def _op_metadata_enrich(self, data: Any, opts: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
@@ -515,17 +669,172 @@ class FileProcessorService:
 
         return data, {"status": "skipped"}
 
-    def _op_llm_json_optimize(self, data: Any, opts: dict[str, Any]) -> tuple[Any, dict[str, Any]]:
-        """Optional LLM structuring with strict grounding and prompt injection defense."""
+    async def _op_llm_json_optimize(
+        self,
+        data: Any,
+        fmt: str = "json",
+        opts: Optional[dict[str, Any]] = None,
+        fallback_title: str = "Uploaded Document",
+    ) -> tuple[Any, dict[str, Any]]:
+        """AI RAG Enhancement with strict grounding and verifiable citations."""
+        opts = opts or {}
         settings = get_settings()
-        api_key = getattr(settings, "openai_api_key", None) or os.getenv("CRAWLBOT_OPENAI_API_KEY")
+        api_key = (
+            opts.get("api_key")
+            or getattr(settings, "openai_api_key", None)
+            or os.getenv("CRAWLBOT_OPENAI_API_KEY", "")
+        )
 
-        if not api_key:
-            return data, {"warnings": ["کلید API هوش مصنوعی تنظیم نشده است؛ عملیات LLM رد شد."]}
+        if not api_key or not api_key.strip():
+            return data, {
+                "warnings": [
+                    "کلید API هوش مصنوعی (CRAWLBOT_OPENAI_API_KEY) تنظیم نشده است؛ عملیات بهینه‌سازی LLM رد شد."
+                ]
+            }
 
-        # If LLM is available, enforce safety and return structured JSON
-        # In case of offline or testing, fallback safely to deterministic structure
-        return data, {"status": "llm_optimized"}
+        base_url = opts.get("base_url") or settings.openai_base_url or None
+        model = opts.get("llm_model") or settings.llm_model or "gpt-4o-mini"
+        concurrency = opts.get("ai_concurrency") or getattr(settings, "ai_concurrency", 3)
+
+        try:
+            enhancer = RAGEnhancer(
+                api_key=api_key.strip(),
+                base_url=base_url,
+                model=model,
+                concurrency=concurrency,
+            )
+            docs = self._to_extracted_documents(data, fmt, opts, fallback_title)
+            eligible = [d for d in docs if d.has_content]
+            if not eligible:
+                return data, {"warnings": ["محتوای متنی کافی برای غنی‌سازی هوش مصنوعی یافت نشد."]}
+
+            results = await enhancer.enhance_documents(eligible)
+
+            if isinstance(data, str) and (fmt != "json" or not data.strip().startswith(("{", "["))):
+                res0 = results[0] if results else {}
+                enriched_data = {
+                    "title": eligible[0].title,
+                    "summary": res0.get("summary", ""),
+                    "topics": res0.get("topics", []),
+                    "keywords": res0.get("keywords", []),
+                    "qa_pairs": res0.get("qa_pairs", []),
+                    "page_type": res0.get("page_type", ""),
+                    "dynamic_content": res0.get("dynamic_content", False),
+                    "content": data,
+                }
+                return enriched_data, {
+                    "status": "llm_optimized",
+                    "enhanced_docs": len(results),
+                    "qa_pairs_count": sum(len(r.get("qa_pairs", [])) for r in results),
+                }
+
+            if isinstance(data, dict):
+                enriched_data = dict(data)
+                res0 = results[0] if results else {}
+                enriched_data["rag_enhancement"] = {
+                    "summary": res0.get("summary", ""),
+                    "topics": res0.get("topics", []),
+                    "keywords": res0.get("keywords", []),
+                    "qa_pairs": res0.get("qa_pairs", []),
+                    "page_type": res0.get("page_type", ""),
+                }
+                return enriched_data, {
+                    "status": "llm_optimized",
+                    "enhanced_docs": 1,
+                    "qa_pairs_count": len(res0.get("qa_pairs", [])),
+                }
+
+            if isinstance(data, list):
+                enriched_list = []
+                for idx, item in enumerate(data):
+                    res_item = results[idx] if idx < len(results) else {}
+                    if isinstance(item, dict):
+                        item_copy = dict(item)
+                        item_copy["rag_enhancement"] = {
+                            "summary": res_item.get("summary", ""),
+                            "topics": res_item.get("topics", []),
+                            "keywords": res_item.get("keywords", []),
+                            "qa_pairs": res_item.get("qa_pairs", []),
+                            "page_type": res_item.get("page_type", ""),
+                        }
+                        enriched_list.append(item_copy)
+                    else:
+                        enriched_list.append(item)
+                return enriched_list, {
+                    "status": "llm_optimized",
+                    "enhanced_docs": len(results),
+                    "qa_pairs_count": sum(len(r.get("qa_pairs", [])) for r in results),
+                }
+
+            return data, {"status": "llm_optimized", "enhanced_docs": len(results)}
+
+        except Exception as e:
+            logger.warning("LLM optimization failed: %s", e)
+            return data, {"warnings": [f"خطا در بهینه‌سازی هوش مصنوعی: {str(e)}"]}
+
+    async def _op_embed(
+        self,
+        data: Any,
+        fmt: str = "json",
+        opts: Optional[dict[str, Any]] = None,
+        fallback_title: str = "Uploaded Document",
+    ) -> tuple[Any, dict[str, Any]]:
+        """Generate dense vector embeddings using OpenAI Embedding API."""
+        opts = opts or {}
+        settings = get_settings()
+        api_key = (
+            opts.get("api_key")
+            or getattr(settings, "openai_api_key", None)
+            or os.getenv("CRAWLBOT_OPENAI_API_KEY", "")
+        )
+
+        if not api_key or not api_key.strip():
+            return data, {
+                "warnings": [
+                    "کلید API هوش مصنوعی (CRAWLBOT_OPENAI_API_KEY) برای تولید وکتور Embedding تنظیم نشده است."
+                ]
+            }
+
+        base_url = opts.get("base_url") or settings.openai_base_url or None
+        model = opts.get("embedding_model") or settings.embedding_model or "text-embedding-3-small"
+
+        try:
+            embedder = EmbeddingService(
+                api_key=api_key.strip(),
+                base_url=base_url,
+                model=model,
+            )
+
+            is_chunks = (
+                isinstance(data, list)
+                and len(data) > 0
+                and isinstance(data[0], dict)
+                and ("chunk_id" in data[0] or ("text" in data[0] and "chunk_index" in data[0]))
+            )
+
+            if is_chunks:
+                chunks = [DocumentChunk(**item) for item in data]
+            else:
+                chunks_data, _ = self._op_chunk(data, fmt, opts, fallback_title)
+                chunks = [DocumentChunk(**item) for item in chunks_data]
+
+            if not chunks:
+                return data, {"warnings": ["هیچ قطعه‌ای برای تولید وکتور Embedding یافت نشد."]}
+
+            stats = await embedder.embed_chunks(chunks)
+            serialized = [c.model_dump() for c in chunks]
+
+            return serialized, {
+                "total_chunks": stats.total_chunks,
+                "embedded_chunks": stats.embedded_chunks,
+                "failed_chunks": stats.failed_chunks,
+                "model": stats.model,
+                "total_tokens": stats.total_tokens,
+            }
+
+        except Exception as e:
+            logger.warning("Embedding operation failed: %s", e)
+            return data, {"warnings": [f"خطا در ایجاد بردارهای Embedding: {str(e)}"]}
 
     # -----------------------------------------------------------------------
     # Helper Utilities
@@ -552,14 +861,34 @@ class FileProcessorService:
         elif fmt == "csv":
             if isinstance(data, list) and data and isinstance(data[0], dict):
                 output = io.StringIO()
-                writer = csv.DictWriter(output, fieldnames=list(data[0].keys()))
+                fieldnames = list(data[0].keys())
+                writer = csv.DictWriter(output, fieldnames=fieldnames)
                 writer.writeheader()
-                writer.writerows(data)
+                for row in data:
+                    row_clean = {}
+                    for k, v in row.items():
+                        if isinstance(v, (dict, list)):
+                            row_clean[k] = json.dumps(v, ensure_ascii=False)
+                        else:
+                            row_clean[k] = v
+                    writer.writerow(row_clean)
                 return output.getvalue()
             return str(data)
-        elif fmt in {"md", "txt"}:
+        elif fmt == "md":
             if isinstance(data, str):
                 return data
+            if isinstance(data, list) and data and isinstance(data[0], dict) and "text" in data[0]:
+                parts = []
+                for i, c in enumerate(data, 1):
+                    header = f"### {c.get('heading_context') or c.get('title') or f'قطعه شماره {i}'}\n\n"
+                    parts.append(f"{header}{c.get('text', '')}")
+                return "\n\n---\n\n".join(parts)
+            return json.dumps(data, ensure_ascii=False, indent=2)
+        elif fmt == "txt":
+            if isinstance(data, str):
+                return data
+            if isinstance(data, list) and data and isinstance(data[0], dict) and "text" in data[0]:
+                return "\n\n".join(c.get("text", "") for c in data)
             return json.dumps(data, ensure_ascii=False, indent=2)
         return str(data)
 

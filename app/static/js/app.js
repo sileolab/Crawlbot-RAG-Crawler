@@ -2426,10 +2426,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 const ops = [];
                 if (document.getElementById('check-file-op-normalize')?.checked) ops.push('normalize');
+                if (document.getElementById('check-file-op-chunk')?.checked) ops.push('chunk');
+                if (document.getElementById('check-file-op-ai')?.checked) ops.push('llm_json_optimize');
+                if (document.getElementById('check-file-op-embed')?.checked) ops.push('embed');
                 if (document.getElementById('check-file-op-md2json')?.checked) ops.push('markdown_to_json');
                 if (document.getElementById('check-file-op-validate')?.checked) ops.push('json_validate');
                 if (document.getElementById('check-file-op-cleanup')?.checked) ops.push('json_cleanup');
-                if (document.getElementById('check-file-op-chunk')?.checked) ops.push('chunk');
                 if (document.getElementById('check-file-op-enrich')?.checked) ops.push('metadata_enrich');
 
                 if (ops.length === 0) {
@@ -2458,8 +2460,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     document.getElementById('stat-file-records-in').textContent = data.telemetry?.records_in || 0;
                     document.getElementById('stat-file-records-out').textContent = data.telemetry?.records_out || 0;
                     document.getElementById('stat-file-chunks').textContent = data.telemetry?.chunks_produced || 0;
+                    const statVectors = document.getElementById('stat-file-vectors');
+                    if (statVectors) statVectors.textContent = data.telemetry?.embedded_chunks || 0;
                     document.getElementById('stat-file-fixes').textContent = data.telemetry?.normalization_fixes || 0;
                     document.getElementById('stat-file-duration').textContent = `${data.duration_seconds || 0}s`;
+
+                    if (data.telemetry?.warnings && data.telemetry.warnings.length > 0) {
+                        showToast(data.telemetry.warnings[0], 'warning');
+                    }
 
                     const btnDownload = document.getElementById('btn-download-file-result');
                     if (btnDownload) {

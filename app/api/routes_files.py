@@ -69,7 +69,7 @@ async def process_file(request: dict[str, Any]) -> ApiResponse:
     options = request.get("options", {})
 
     try:
-        result = _file_service.process(file_id, operations, options)
+        result = await _file_service.process(file_id, operations, options)
         logger.info("Processed file %s with operations %s", file_id, operations)
         return ApiResponse.ok(
             data=result,

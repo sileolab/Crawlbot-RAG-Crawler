@@ -247,6 +247,147 @@ class TestFileProcessingOperations:
         assert enriched["category"] == "legal_docs"
         assert enriched["metadata"]["domain"] == "enterprise.local"
 
+    def test_chunking_json_documents(self, client):
+        docs_json = [
+            {"title": "Doc 1", "content": "پاراگراف اول در سند آزمایشی نخست که درباره هوش مصنوعی توضیح می‌دهد."},
+            {"title": "Doc 2", "content": "پاراگراف دوم در سند آزمایشی دوم درباره سیستم‌های بازیابی و RAG."},
+        ]
+        files = {"file": ("docs.json", io.BytesIO(json.dumps(docs_json, ensure_ascii=False).encode("utf-8")), "application/json")}
+        upload_resp = client.post("/api/files/upload", files=files)
+        file_id = upload_resp.json()["data"]["file_id"]
+
+        proc_resp = client.post(
+            "/api/files/process",
+            json={
+                "file_id": file_id,
+                "operations": ["chunk"],
+                "options": {
+                    "strategy": "auto",
+                    "chunk_size": 200,
+                },
+            },
+        )
+        assert proc_resp.status_code == 200
+        data = proc_resp.json()["data"]
+        assert data["telemetry"]["chunks_produced"] >= 2
+        chunks = json.loads(data["output_preview"])
+        assert isinstance(chunks, list)
+        assert "chunk_id" in chunks[0]
+        assert "text" in chunks[0]
+
+    def test_llm_json_optimize_without_key_graceful(self, client):
+        content = b"Sample text for AI optimization."
+        files = {"file": ("ai_test.txt", io.BytesIO(content), "text/plain")}
+        upload_resp = client.post("/api/files/upload", files=files)
+        file_id = upload_resp.json()["data"]["file_id"]
+
+        with patch.dict("os.environ", {"CRAWLBOT_OPENAI_API_KEY": ""}, clear=False):
+            with patch("app.services.file_processor.get_settings") as mock_settings:
+                mock_settings.return_value.openai_api_key = ""
+                proc_resp = client.post(
+                    "/api/files/process",
+                    json={
+                        "file_id": file_id,
+                        "operations": ["llm_json_optimize"],
+                    },
+                )
+        assert proc_resp.status_code == 200
+        data = proc_resp.json()["data"]
+        assert any("کلید API" in w for w in data["telemetry"]["warnings"])
+
+    def test_llm_json_optimize_with_mocked_enhancer(self, client):
+        content = b"Sample text for AI RAG enhancement."
+        files = {"file": ("ai_test.txt", io.BytesIO(content), "text/plain")}
+        upload_resp = client.post("/api/files/upload", files=files)
+        file_id = upload_resp.json()["data"]["file_id"]
+
+        mock_results = [{
+            "url": "https://crawlbot.local/file/ai_test.txt",
+            "summary": "این یک خلاصه هوشمند است.",
+            "topics": ["فناوری", "هوش مصنوعی"],
+            "keywords": ["RAG", "Crawlbot"],
+            "qa_pairs": [{"question": "پرسش چیست؟", "answer": "پاسخ این است.", "evidence": "Sample text", "verified": True}],
+            "page_type": "article",
+            "dynamic_content": False,
+            "success": True,
+        }]
+
+        with patch("app.services.file_processor.RAGEnhancer") as mock_cls:
+            instance = mock_cls.return_value
+            instance.enhance_documents = AsyncMock(return_value=mock_results)
+
+            proc_resp = client.post(
+                "/api/files/process",
+                json={
+                    "file_id": file_id,
+                    "operations": ["llm_json_optimize"],
+                    "options": {"api_key": "sk-mock-key-for-test"},
+                },
+            )
+        assert proc_resp.status_code == 200
+        data = proc_resp.json()["data"]
+        parsed = json.loads(data["output_preview"])
+        assert parsed["summary"] == "این یک خلاصه هوشمند است."
+        assert len(parsed["qa_pairs"]) == 1
+
+    def test_embedding_operation_without_key_graceful(self, client):
+        content = b"Sample text for vector embedding."
+        files = {"file": ("embed_test.txt", io.BytesIO(content), "text/plain")}
+        upload_resp = client.post("/api/files/upload", files=files)
+        file_id = upload_resp.json()["data"]["file_id"]
+
+        with patch.dict("os.environ", {"CRAWLBOT_OPENAI_API_KEY": ""}, clear=False):
+            with patch("app.services.file_processor.get_settings") as mock_settings:
+                mock_settings.return_value.openai_api_key = ""
+                proc_resp = client.post(
+                    "/api/files/process",
+                    json={
+                        "file_id": file_id,
+                        "operations": ["embed"],
+                    },
+                )
+        assert proc_resp.status_code == 200
+        data = proc_resp.json()["data"]
+        assert any("Embedding" in w for w in data["telemetry"]["warnings"])
+
+    def test_embedding_operation_with_mocked_service(self, client):
+        content = b"Sample text for vector embedding with mock."
+        files = {"file": ("embed_mock.txt", io.BytesIO(content), "text/plain")}
+        upload_resp = client.post("/api/files/upload", files=files)
+        file_id = upload_resp.json()["data"]["file_id"]
+
+        from app.schemas.chunks import EmbeddingStats
+
+        async def fake_embed_chunks(chunks):
+            for c in chunks:
+                c.embedding = [0.1, 0.2, 0.3]
+                c.embedding_model = "text-embedding-3-small"
+            return EmbeddingStats(
+                total_chunks=len(chunks),
+                embedded_chunks=len(chunks),
+                failed_chunks=0,
+                model="text-embedding-3-small",
+                total_tokens=15,
+            )
+
+        with patch("app.services.file_processor.EmbeddingService") as mock_cls:
+            instance = mock_cls.return_value
+            instance.embed_chunks = AsyncMock(side_effect=fake_embed_chunks)
+
+            proc_resp = client.post(
+                "/api/files/process",
+                json={
+                    "file_id": file_id,
+                    "operations": ["chunk", "embed"],
+                    "options": {"api_key": "sk-mock-key-for-test"},
+                },
+            )
+        assert proc_resp.status_code == 200
+        data = proc_resp.json()["data"]
+        assert data["telemetry"]["embedded_chunks"] > 0
+        chunks = json.loads(data["output_preview"])
+        assert chunks[0]["embedding"] == [0.1, 0.2, 0.3]
+
 
 # ---------------------------------------------------------------------------
 # End-to-End Pipeline & Artifact Retrieval Tests

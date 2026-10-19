@@ -885,6 +885,7 @@
                     </div>
                 </div>
             </div>
+        </section>
 
         <!-- ============================================== -->
         <!-- TAB 4: FILE & DATA PROCESSING (پردازش فایل و داده) -->
@@ -955,27 +956,54 @@
 
                 <div class="card-body-compact">
                     <!-- Operation Selector Grid -->
-                    <label class="form-label-rounded" style="margin-bottom: 0.75rem; display: block;">عملیات مورد نظر برای اجرا (Pipeline):</label>
+                    <label class="form-label-rounded" style="margin-bottom: 0.75rem; display: block;">انتخاب عملیات خط لوله (Pipeline Operations):</label>
                     <div class="file-ops-selection-grid">
                         <label class="file-op-card" for="check-file-op-normalize">
                             <input type="checkbox" id="check-file-op-normalize" value="normalize" checked />
                             <div>
-                                <div class="file-op-title">نرمال‌سازی فارسی و یونیکد</div>
-                                <div class="file-op-desc">Unicode NFC، یکسان‌سازی حروف ي/ی و ك/ک، اصلاح نیم‌فاصله افعال (نمی‌شود) و جمع‌ها (داده‌ها)</div>
+                                <div class="file-op-title">نرمال‌سازی فارسی و تمیزکاری متن</div>
+                                <div class="file-op-desc">Unicode NFC، یکسان‌سازی حروف و ارقام، اصلاح خودکار نیم‌فاصله افعال (نمی‌شود) و پسوندهای جمع (داده‌ها)</div>
+                            </div>
+                        </label>
+                        <label class="file-op-card" for="check-file-op-chunk">
+                            <input type="checkbox" id="check-file-op-chunk" value="chunk" checked />
+                            <div>
+                                <div class="file-op-title">تقطیع هوشمند اسناد (Smart Chunking)</div>
+                                <div class="file-op-desc">تبدیل محتوای سند به قطعات استاندارد معنایی با حفظ کانتکست تیترهای H1-H6، پاراگراف و بدون برش ناقص کلمات</div>
+                            </div>
+                        </label>
+                        <label class="file-op-card" for="check-file-op-ai">
+                            <input type="checkbox" id="check-file-op-ai" value="llm_json_optimize" />
+                            <div>
+                                <div class="file-op-title" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+                                    <span>بهینه‌سازی با هوش مصنوعی (RAG Enhancer)</span>
+                                    <span class="badge badge-info-outline" style="font-size: 0.7rem;">LLM / OpenAI</span>
+                                </div>
+                                <div class="file-op-desc">استخراج خودکار خلاصه کوتاه، برچسب‌های موضوعی، کلیدواژه‌های اصلی و پرسش‌وپاسخ‌های راستی‌آزمایی‌شده با استناد دقیق به متن</div>
+                            </div>
+                        </label>
+                        <label class="file-op-card" for="check-file-op-embed">
+                            <input type="checkbox" id="check-file-op-embed" value="embed" />
+                            <div>
+                                <div class="file-op-title" style="display: flex; align-items: center; justify-content: space-between; gap: 0.5rem;">
+                                    <span>تولید بردارهای جاسازی (Vector Embedding)</span>
+                                    <span class="badge badge-info-outline" style="font-size: 0.7rem;">Embedding</span>
+                                </div>
+                                <div class="file-op-desc">تولید بردارهای متراکم معنایی ۱۵۳۶ بعدی برای قطعات با مدل text-embedding-3-small و آماده‌سازی جهت بارگذاری در پایگاه داده برداری</div>
                             </div>
                         </label>
                         <label class="file-op-card" for="check-file-op-md2json">
                             <input type="checkbox" id="check-file-op-md2json" value="markdown_to_json" />
                             <div>
                                 <div class="file-op-title">تبدیل Markdown به JSON</div>
-                                <div class="file-op-desc">استخراج سلسله‌مراتب تیترها، بخش‌ها، فهرست‌ها و جداول در قالب آبجکت استاندارد JSON</div>
+                                <div class="file-op-desc">استخراج سلسله‌مراتب تیترها، بخش‌ها، فهرست‌ها و جداول در قالب ساختاریافته استاندارد JSON</div>
                             </div>
                         </label>
                         <label class="file-op-card" for="check-file-op-validate">
                             <input type="checkbox" id="check-file-op-validate" value="json_validate" />
                             <div>
                                 <div class="file-op-title">اعتبارسنجی ساختار JSON</div>
-                                <div class="file-op-desc">بررسی ساختار نحوی، اعتبارسنجی عمق تودرتویی و گزارش خطاهای خط به خط</div>
+                                <div class="file-op-desc">بررسی ساختار نحوی، اعتبارسنجی عمق تودرتویی و گزارش دقیق خطاهای خط به خط</div>
                             </div>
                         </label>
                         <label class="file-op-card" for="check-file-op-cleanup">
@@ -985,18 +1013,11 @@
                                 <div class="file-op-desc">حذف فاصله‌های زاید، پالایش مقادیر تهی (null) و یکدست‌سازی ساختار رکوردهای داده</div>
                             </div>
                         </label>
-                        <label class="file-op-card" for="check-file-op-chunk">
-                            <input type="checkbox" id="check-file-op-chunk" value="chunk" checked />
-                            <div>
-                                <div class="file-op-title">تقطیع هوشمند (Smart Chunking)</div>
-                                <div class="file-op-desc">تبدیل محتوای سند به قطعات استاندارد با حفظ کانتکست تیترهای H1-H6 و بدون برش کلمات</div>
-                            </div>
-                        </label>
                         <label class="file-op-card" for="check-file-op-enrich">
                             <input type="checkbox" id="check-file-op-enrich" value="metadata_enrich" checked />
                             <div>
-                                <div class="file-op-title">غنی‌سازی متادیتا و هش‌ها</div>
-                                <div class="file-op-desc">محاسبه اثرانگشت SHA-256، آمار کلمات، دسته‌بندی و الصاق مهرموم زمانی به هر رکورد</div>
+                                <div class="file-op-title">غنی‌سازی متادیتا و اثرانگشت</div>
+                                <div class="file-op-desc">محاسبه اثرانگشت SHA-256، آمار کلمات، دسته‌بندی و الصاق مهرموم زمانی به هر رکورد داده</div>
                             </div>
                         </label>
                     </div>
@@ -1004,7 +1025,7 @@
                     <!-- Configuration Parameters Grid -->
                     <div class="form-grid-3">
                         <div class="form-group-rounded">
-                            <label for="select-file-chunk-strategy" class="form-label-rounded">استراتژی تقطیع:</label>
+                            <label for="select-file-chunk-strategy" class="form-label-rounded">استراتژی تقطیع (Chunk Strategy):</label>
                             <select id="select-file-chunk-strategy" class="form-control">
                                 <option value="auto" selected>انتخاب خودکار (Auto) — هوشمند</option>
                                 <option value="semantic_heading">عنوان معنایی (Semantic Heading)</option>
@@ -1084,6 +1105,10 @@
                         <div class="file-telemetry-card">
                             <div class="file-telemetry-num" id="stat-file-chunks">0</div>
                             <div class="file-telemetry-label">قطعات چانک</div>
+                        </div>
+                        <div class="file-telemetry-card">
+                            <div class="file-telemetry-num" id="stat-file-vectors">0</div>
+                            <div class="file-telemetry-label">بردارهای Embedding</div>
                         </div>
                         <div class="file-telemetry-card">
                             <div class="file-telemetry-num" id="stat-file-fixes">0</div>

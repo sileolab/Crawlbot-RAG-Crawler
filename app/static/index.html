@@ -1,0 +1,976 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Crawlbot Studio | پلتفرم هوشمند کشف، استخراج و خط لوله RAG</title>
+    
+    <!-- Google Fonts: Vazirmatn -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Vazirmatn:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+    
+    <!-- Font Awesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css" integrity="sha512-DTOQO9RWCH3ppGqcWaEA1BIZOC6xxalwEsw9c2QQeAIftl+Vegovlnee1c9QX4TctnWMn13TZye+giMm8e2LwA==" crossorigin="anonymous" referrerpolicy="no-referrer" />
+    
+    <!-- Custom Modern Stylesheet -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body class="dark-theme">
+    <!-- Top Modern Rounded Header -->
+    <header class="app-header">
+        <div class="header-container">
+            <div class="brand">
+                <div class="brand-logo">
+                    <i class="fa-solid fa-spider"></i>
+                </div>
+                <div class="brand-details">
+                    <span class="brand-title">CRAWLBOT <span class="brand-badge">STUDIO</span></span>
+                </div>
+            </div>
+            
+            <!-- Navigation Segmented Tabs -->
+            <nav class="nav-tabs-wrapper" aria-label="تب‌های اصلی سامانه">
+                <div class="nav-segmented">
+                    <button type="button" class="tab-button active" id="tab-btn-discover" data-tab="discover" role="tab" aria-selected="true" aria-controls="tab-content-discover" title="پیمایش و کشف ساختار وب‌سایت">
+                        <i class="fa-solid fa-compass"></i>
+                        <span>کشف نشانی‌ها</span>
+                        <span class="tab-counter" id="discover-badge-count">0</span>
+                    </button>
+                    <button type="button" class="tab-button" id="tab-btn-extract" data-tab="extract" role="tab" aria-selected="false" aria-controls="tab-content-extract" title="استخراج ساختاریافته محتوای متنی">
+                        <i class="fa-solid fa-file-invoice"></i>
+                        <span>استخراج محتوا</span>
+                        <span class="tab-counter" id="extract-badge-count">0</span>
+                    </button>
+                    <button type="button" class="tab-button tab-button-ai" id="tab-btn-ai" data-tab="ai" role="tab" aria-selected="false" aria-controls="tab-content-ai" title="استودیوی هوش مصنوعی: LLM · تقطیع · وکتورسازی">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                        <span>استودیوی RAG</span>
+                        <span class="tab-counter tab-counter-ai" id="ai-badge-count">AI</span>
+                    </button>
+                </div>
+            </nav>
+
+            <!-- Live Status Indicator -->
+            <div class="header-status">
+                <span class="system-status-badge active" id="system-status-indicator" title="وضعیت سرور و پاسخگویی API">
+                    <span class="status-dot"></span>
+                    <span id="system-status-text">سیستم آماده است</span>
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content Canvas -->
+    <main class="main-container">
+        
+        <!-- ============================================== -->
+        <!-- TAB 1: DISCOVERY (کشف ساختار وب‌سایت)         -->
+        <!-- ============================================== -->
+        <section class="tab-content active" id="tab-content-discover" role="tabpanel" aria-labelledby="tab-btn-discover">
+            
+            <!-- Sleek Command Input Card -->
+            <div class="card discovery-main-card">
+                <div class="card-header-compact">
+                    <div class="card-title-group">
+                        <div class="title-icon-box">
+                            <i class="fa-solid fa-compass title-icon"></i>
+                        </div>
+                        <div>
+                            <h2>کشف نشانی‌ها و نقشه وب‌سایت</h2>
+                            <span class="card-subtitle">پیمایش هوشمند ساختار صفحات با رعایت Robots.txt و استخراج Sitemap</span>
+                        </div>
+                    </div>
+                    <div class="card-actions-group">
+                        <button type="button" class="btn btn-secondary btn-sm" id="btn-toggle-advanced" aria-expanded="false" aria-controls="discovery-advanced-panel" title="تنظیمات دقیق عمق، همزمانی و الگوها">
+                            <i class="fa-solid fa-sliders"></i>
+                            <span>تنظیمات پیشرفته</span>
+                            <i class="fa-solid fa-chevron-down toggle-icon"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <form id="discovery-form" class="card-body-compact" onsubmit="return false;">
+                    <!-- URL Command Bar -->
+                    <div class="command-input-bar">
+                        <div class="input-icon-box">
+                            <i class="fa-solid fa-link"></i>
+                        </div>
+                        <input type="url" id="input-root-url" class="form-control form-control-hero" placeholder="نشانی ریشه وب‌سایت را وارد کنید (مثال: https://example.com)..." required dir="ltr" autocomplete="off" />
+                        
+                        <div class="command-actions">
+                            <button type="button" class="btn btn-primary" id="btn-start-discovery" title="کلیک یا کلید Enter جهت شروع">
+                                <i class="fa-solid fa-play"></i>
+                                <span>شروع فرآیند کشف</span>
+                            </button>
+                            <button type="button" class="btn btn-danger hidden" id="btn-cancel-discovery" title="توقف فوری فرآیند">
+                                <i class="fa-solid fa-stop"></i>
+                                <span>توقف</span>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Collapsible Advanced Settings Grid -->
+                    <div class="collapsible-panel" id="discovery-advanced-panel" aria-hidden="true">
+                        <div class="panel-content-inner">
+                            <div class="settings-grid">
+                                <!-- Max Depth -->
+                                <div class="form-group-rounded" title="حداکثر عمق پیمایش پیوندها از صفحه اصلی">
+                                    <label for="input-max-depth" class="form-label-rounded">
+                                        <i class="fa-solid fa-layer-group"></i> حداکثر عمق (Max Depth)
+                                    </label>
+                                    <input type="number" id="input-max-depth" class="form-control" value="3" min="1" max="20" />
+                                </div>
+
+                                <!-- Max Pages -->
+                                <div class="form-group-rounded" title="سقف مجاز تعداد صفحات جهت کشف">
+                                    <label for="input-max-pages" class="form-label-rounded">
+                                        <i class="fa-solid fa-hashtag"></i> سقف صفحات (Max Pages)
+                                    </label>
+                                    <input type="number" id="input-max-pages" class="form-control" value="100" min="1" max="10000" />
+                                </div>
+
+                                <!-- Timeout -->
+                                <div class="form-group-rounded" title="مهلت انتظار دریافت پاسخ (ثانیه)">
+                                    <label for="input-timeout" class="form-label-rounded">
+                                        <i class="fa-solid fa-clock"></i> تایم‌اوت (ثانیه)
+                                    </label>
+                                    <input type="number" id="input-timeout" class="form-control" value="30" min="1" max="300" />
+                                </div>
+
+                                <!-- Concurrency -->
+                                <div class="form-group-rounded" title="تعداد درخواست‌های همزمان">
+                                    <label for="input-concurrency" class="form-label-rounded">
+                                        <i class="fa-solid fa-bolt"></i> تعداد همزمانی
+                                    </label>
+                                    <input type="number" id="input-concurrency" class="form-control" value="5" min="1" max="50" />
+                                </div>
+
+                                <!-- Delay -->
+                                <div class="form-group-rounded" title="تأخیر میان درخواست‌ها برای جلوگیری از بلاک شدن">
+                                    <label for="input-delay" class="form-label-rounded">
+                                        <i class="fa-solid fa-hourglass-half"></i> وقفه در ثانیه (Delay)
+                                    </label>
+                                    <input type="number" id="input-delay" class="form-control" value="0.5" min="0" max="60" step="0.1" />
+                                </div>
+
+                                <!-- Path Prefix -->
+                                <div class="form-group-rounded" title="محدود کردن خزش تنها به این پیشوند مسیر">
+                                    <label for="input-path-prefix" class="form-label-rounded">
+                                        <i class="fa-solid fa-folder-tree"></i> پیشوند مسیر (Prefix)
+                                    </label>
+                                    <input type="text" id="input-path-prefix" class="form-control text-monospace" placeholder="/blog/ یا /articles/" dir="ltr" />
+                                </div>
+                            </div>
+
+                            <!-- Toggle Chips -->
+                            <div class="toggle-chips-row">
+                                <label class="chip-checkbox" title="پیمایش زیردامنه‌ها مجاز باشد">
+                                    <input type="checkbox" id="check-allow-subdomains" />
+                                    <span class="chip-box"><i class="fa-solid fa-network-wired"></i> پیمایش زیردامنه‌ها (Subdomains)</span>
+                                </label>
+
+                                <label class="chip-checkbox" title="پارامترهای Query String حذف نشوند">
+                                    <input type="checkbox" id="check-keep-query-params" />
+                                    <span class="chip-box"><i class="fa-solid fa-question"></i> حفظ پارامترهای آدرس (Query Params)</span>
+                                </label>
+
+                                <label class="chip-checkbox" title="بررسی خودکار فایل sitemap.xml">
+                                    <input type="checkbox" id="check-use-sitemap" checked />
+                                    <span class="chip-box"><i class="fa-solid fa-sitemap"></i> استفاده از نقشه سایت (Sitemap)</span>
+                                </label>
+                            </div>
+
+                            <!-- Regex Patterns Row -->
+                            <div class="form-grid-2">
+                                <div class="form-group-rounded">
+                                    <label for="input-include-patterns" class="form-label-rounded"><i class="fa-solid fa-filter"></i> الگوهای مجاز (Include Regex - هر خط یک الگو):</label>
+                                    <textarea id="input-include-patterns" class="form-control text-monospace" rows="2" placeholder="^https://example\.com/blog/.*" dir="ltr"></textarea>
+                                </div>
+
+                                <div class="form-group-rounded">
+                                    <label for="input-exclude-patterns" class="form-label-rounded"><i class="fa-solid fa-ban"></i> الگوهای ممنوع (Exclude Regex - هر خط یک الگو):</label>
+                                    <textarea id="input-exclude-patterns" class="form-control text-monospace" rows="2" placeholder=".*\.(jpg|png|pdf|zip)$&#10;/login&#10;/cart" dir="ltr"></textarea>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Modern Telemetry & Progress Strip -->
+            <div class="card status-overview-card" id="discovery-status-card">
+                <div class="status-strip">
+                    <div class="strip-left">
+                        <span class="metric-chip"><i class="fa-solid fa-fingerprint"></i> شناسه کار: <code id="discovery-job-id">-</code></span>
+                        <span class="badge badge-secondary" id="discovery-status-badge">آماده شروع</span>
+                    </div>
+
+                    <div class="strip-progress">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar" id="discovery-progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%;"></div>
+                        </div>
+                        <span class="progress-percentage" id="discovery-progress-text">0%</span>
+                    </div>
+
+                    <div class="strip-counters">
+                        <div class="micro-stat" title="مجموع نشانی‌های کشف‌شده">
+                            <span class="micro-val" id="stat-discovery-total">0</span>
+                            <span class="micro-lbl"><i class="fa-solid fa-globe"></i> کل صفحات</span>
+                        </div>
+                        <div class="micro-stat" title="صفحات موفقیت‌آمیز">
+                            <span class="micro-val text-success" id="stat-discovery-crawled">0</span>
+                            <span class="micro-lbl"><i class="fa-solid fa-check"></i> پیمایش‌شده</span>
+                        </div>
+                        <div class="micro-stat" title="خطا یا مسدود">
+                            <span class="micro-val text-danger" id="stat-discovery-failed">0</span>
+                            <span class="micro-lbl"><i class="fa-solid fa-xmark"></i> ناموفق</span>
+                        </div>
+                        <div class="micro-stat" title="انتخاب‌شده برای استخراج">
+                            <span class="micro-val text-primary" id="stat-discovery-selected">0</span>
+                            <span class="micro-lbl"><i class="fa-solid fa-square-check"></i> انتخاب‌شده</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Discovery Results Table Card -->
+            <div class="card results-card" id="discovery-results-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <div class="table-search-box">
+                            <i class="fa-solid fa-search search-icon"></i>
+                            <input type="text" id="input-discovery-search" class="form-control" placeholder="جستجو در نشانی‌ها یا عنوان..." />
+                            <button type="button" class="btn-clear-search hidden" id="btn-clear-discovery-search" title="پاک کردن فیلتر">
+                                <i class="fa-solid fa-xmark"></i>
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="toolbar-right">
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-select-all" title="انتخاب تمام موارد فیلترشده">
+                                <i class="fa-solid fa-check-double"></i>
+                                <span>انتخاب همه</span>
+                            </button>
+                            <button type="button" class="btn btn-secondary btn-sm" id="btn-deselect-all" title="لغو انتخاب">
+                                <i class="fa-regular fa-square"></i>
+                                <span>لغو انتخاب</span>
+                            </button>
+                        </div>
+
+                        <button type="button" class="btn btn-success btn-sm" id="btn-send-to-extraction" disabled title="انتقال نشانی‌های انتخابی به تب استخراج">
+                            <i class="fa-solid fa-share-from-square"></i>
+                            <span>ارسال به بخش استخراج (<span id="btn-send-count">0</span>)</span>
+                        </button>
+
+                        <button type="button" class="btn btn-outline btn-sm" id="btn-export-discovered-urls" title="خروجی متنی TXT از آدرس‌های کشف‌شده">
+                            <i class="fa-solid fa-download"></i>
+                            <span>خروجی نشانی‌ها</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Sleek Data Table -->
+                <div class="table-responsive">
+                    <table class="data-table" id="table-discovery">
+                        <thead>
+                            <tr>
+                                <th class="col-checkbox" scope="col">
+                                    <input type="checkbox" id="header-discovery-checkbox" title="انتخاب همه" />
+                                </th>
+                                <th class="col-url" scope="col">نشانی اینترنتی (URL)</th>
+                                <th class="col-title" scope="col">عنوان صفحه (Title)</th>
+                                <th class="col-status" scope="col">وضعیت</th>
+                                <th class="col-source" scope="col">منبع</th>
+                                <th class="col-depth" scope="col">عمق</th>
+                            </tr>
+                        </thead>
+                        <tbody id="discovery-table-body">
+                            <tr class="empty-state-row">
+                                <td colspan="6">
+                                    <div class="empty-state">
+                                        <div class="empty-icon"><i class="fa-solid fa-compass"></i></div>
+                                        <h4>هیچ صفحه‌ای هنوز کشف نشده است</h4>
+                                        <p>نشانی ریشه وب‌سایت را در کادر بالا وارد کرده و کلید «شروع فرآیند کشف» را بزنید.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="table-footer-minimal">
+                    <span class="footer-count">نمایش <strong id="discovery-showing-count">0</strong> از مجموع <strong id="discovery-total-count">0</strong> صفحه کشف‌شده</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- TAB 2: EXTRACTION (استخراج محتوای صفحات)       -->
+        <!-- ============================================== -->
+        <section class="tab-content" id="tab-content-extract" role="tabpanel" aria-labelledby="tab-btn-extract">
+            
+            <!-- Modern Split Workspace Card -->
+            <div class="card extraction-main-card">
+                <div class="card-header-compact">
+                    <div class="card-title-group">
+                        <div class="title-icon-box">
+                            <i class="fa-solid fa-file-invoice title-icon"></i>
+                        </div>
+                        <div>
+                            <h2>تنظیمات استخراج ساختاریافته و محتوای صفحات</h2>
+                            <span class="card-subtitle">پاکسازی کدهای هرز، استخراج متن مقالات و تبدیل ساختاریافته به Markdown</span>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card-body-compact">
+                    <div class="extraction-split-grid">
+                        
+                        <!-- Left Panel: URL Queue -->
+                        <div class="queue-panel">
+                            <div class="queue-header">
+                                <span class="queue-title"><i class="fa-solid fa-list-check"></i> صف نشانی‌های آماده استخراج:</span>
+                                <div class="queue-tags">
+                                    <span class="badge badge-info" id="urls-input-count">0 ورودی</span>
+                                    <span class="count-tag" id="selected-urls-count">0 نشانی</span>
+                                </div>
+                            </div>
+                            
+                            <textarea id="input-extraction-urls-textarea" class="form-control text-monospace" rows="4" placeholder="نشانی‌های دلخواه را به صورت دستی وارد نمایید (هر آدرس در یک خط)..." dir="ltr"></textarea>
+                            
+                            <div class="queue-actions">
+                                <button type="button" class="btn btn-secondary btn-sm" id="btn-add-urls" title="افزودن نشانی‌ها به صف استخراج">
+                                    <i class="fa-solid fa-plus"></i>
+                                    <span>افزودن به فهرست</span>
+                                </button>
+                                <button type="button" class="btn btn-outline-danger btn-sm" id="btn-clear-selected-urls" title="پاکسازی کامل فهرست">
+                                    <i class="fa-solid fa-trash-can"></i>
+                                    <span>پاکسازی فهرست</span>
+                                </button>
+                            </div>
+
+                            <div class="selected-urls-list" id="selected-urls-list-container">
+                                <div class="empty-list-notice">هیچ نشانی‌ای هنوز در صف قرار ندارد. از تب کشف موارد را ارسال کنید یا دستی نشانی اضافه نمایید.</div>
+                            </div>
+                        </div>
+
+                        <!-- Right Panel: Options & Run -->
+                        <div class="options-panel">
+                            <div class="form-group-rounded" title="استراتژی پاکسازی و استخراج محتوا">
+                                <label for="select-extraction-strategy" class="form-label-rounded">
+                                    <i class="fa-solid fa-wand-magic-sparkles"></i> موتور استخراج محتوا (Engine)
+                                </label>
+                                <select id="select-extraction-strategy" class="form-control">
+                                    <option value="auto" selected>✨ خودکار هوشمند (Auto Mode — تشخیص صفحه و Fallback)</option>
+                                    <option value="trafilatura">🪶 ترافیلاچورا (Trafilatura — مقالات، وبلاگ و متون ساختاریافته)</option>
+                                    <option value="beautifulsoup">🌐 بیوتیفول‌سوپ (BeautifulSoup — کنترل DOM، جداول و ریزداده‌ها)</option>
+                                    <option value="crawl4ai">🤖 کرال فور ای‌آی (Crawl4AI — رندر مرورگر Headless برای JS/SPA)</option>
+                                    <option value="compare">⚖️ مقایسه جامع (Compare Mode — بنچمارک هر ۳ موتور)</option>
+                                </select>
+                            </div>
+
+                            <div class="options-grid-3">
+                                <div class="form-group-rounded" title="حالت پیمایش و کشف مسیر">
+                                    <label for="select-crawl-mode" class="form-label-rounded">
+                                        <i class="fa-solid fa-route"></i> حالت استخراج
+                                    </label>
+                                    <select id="select-crawl-mode" class="form-control">
+                                        <option value="single_page" selected>تک صفحه (Single)</option>
+                                        <option value="site_crawl">خزش وب‌سایت (Site Crawl)</option>
+                                        <option value="spa_capture">کپچر SPA و روت‌ها (SPA)</option>
+                                        <option value="compare">مقایسه ۳ موتور (Compare)</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group-rounded" title="حالت رندر مرورگر Playwright">
+                                    <label for="select-render-mode" class="form-label-rounded">
+                                        <i class="fa-solid fa-desktop"></i> رندر مرورگر
+                                    </label>
+                                    <select id="select-render-mode" class="form-control">
+                                        <option value="auto" selected>تشخیص خودکار</option>
+                                        <option value="never">فقط HTTP سریع</option>
+                                        <option value="always">همیشه Headless</option>
+                                    </select>
+                                </div>
+
+                                <div class="form-group-rounded" title="حداقل نمره کیفیت خروجی قبل از Fallback (۰ تا ۱۰۰)">
+                                    <label for="input-min-quality-score" class="form-label-rounded">
+                                        <i class="fa-solid fa-star-half-stroke"></i> آستانه کیفیت
+                                    </label>
+                                    <input type="number" id="input-min-quality-score" class="form-control" value="40" min="0" max="100" />
+                                </div>
+                            </div>
+
+                            <div class="options-grid-2">
+                                <div class="form-group-rounded" title="تگ دسته‌بندی پیوست به مستندات">
+                                    <label for="input-extraction-category" class="form-label-rounded">
+                                        <i class="fa-solid fa-tag"></i> دسته‌بندی موضوعی
+                                    </label>
+                                    <input type="text" id="input-extraction-category" class="form-control" placeholder="مثلاً: مقالات، اخبار، فنی..." />
+                                </div>
+
+                                <div class="form-group-rounded" title="تعداد درخواست‌های همزمان پردازش">
+                                    <label for="input-extraction-concurrency" class="form-label-rounded">
+                                        <i class="fa-solid fa-bolt"></i> همزمانی پردازش
+                                    </label>
+                                    <input type="number" id="input-extraction-concurrency" class="form-control" value="5" min="1" max="50" />
+                                </div>
+                            </div>
+
+                            <div class="extraction-cta-box">
+                                <button type="button" class="btn btn-primary btn-lg btn-block" id="btn-start-extraction" title="شروع فرآیند استخراج محتوای صفحات">
+                                    <i class="fa-solid fa-bolt"></i>
+                                    <span>شروع عملیات استخراج محتوا</span>
+                                </button>
+
+                                <div class="extraction-secondary-actions">
+                                    <button type="button" class="btn btn-danger btn-lg hidden" id="btn-cancel-extraction">
+                                        <i class="fa-solid fa-stop"></i>
+                                        <span>توقف استخراج</span>
+                                    </button>
+
+                                    <button type="button" class="btn btn-warning btn-lg hidden" id="btn-retry-failed">
+                                        <i class="fa-solid fa-rotate-right"></i>
+                                        <span>تلاش مجدد موارد ناموفق</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Direct Shortcut to AI Studio Banner -->
+            <div class="card ai-banner-card" id="ai-banner-card">
+                <div class="ai-banner-content">
+                    <div class="ai-banner-icon">
+                        <i class="fa-solid fa-wand-magic-sparkles"></i>
+                    </div>
+                    <div class="ai-banner-info">
+                        <h3>استودیوی هوش مصنوعی و خط لوله RAG</h3>
+                        <p>پس از اتمام استخراج، می‌توانید مستندات را با LLM ساختاردهی کنید، به قطعات Chunks تقطیع نمایید و وکتورهای Embedding ۱۵۳۶ بعدی بسازید.</p>
+                    </div>
+                    <div class="ai-banner-actions">
+                        <button type="button" class="btn btn-ai btn-lg" id="btn-goto-ai-tab">
+                            <i class="fa-solid fa-arrow-left"></i>
+                            <span>ورود به استودیوی RAG</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Metrics Strip for Extraction -->
+            <div class="card status-overview-card" id="extraction-status-card">
+                <div class="status-strip">
+                    <div class="strip-left">
+                        <span class="metric-chip"><i class="fa-solid fa-fingerprint"></i> شناسه کار: <code id="extraction-job-id">-</code></span>
+                        <span class="badge badge-secondary" id="extraction-status-badge">آماده شروع</span>
+                    </div>
+
+                    <div class="strip-progress">
+                        <div class="progress-bar-container">
+                            <div class="progress-bar extraction-bar" id="extraction-progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100" style="width: 0%;"></div>
+                        </div>
+                        <span class="progress-percentage" id="extraction-progress-text">0%</span>
+                    </div>
+
+                    <div class="strip-counters">
+                        <div class="micro-stat" title="کل مستندات در صف">
+                            <span class="micro-val" id="stat-extraction-total">0</span>
+                            <span class="micro-lbl"><i class="fa-solid fa-list-check"></i> کل اسناد</span>
+                        </div>
+                        <div class="micro-stat" title="استخراج موفق">
+                            <span class="micro-val text-success" id="stat-extraction-completed">0</span>
+                            <span class="micro-lbl"><i class="fa-solid fa-circle-check"></i> استخراج موفق</span>
+                        </div>
+                        <div class="micro-stat" title="خطا / ناموفق">
+                            <span class="micro-val text-danger" id="stat-extraction-failed">0</span>
+                            <span class="micro-lbl"><i class="fa-solid fa-circle-xmark"></i> ناموفق</span>
+                        </div>
+                        <div class="micro-stat" title="مجموع کلمات استخراج‌شده">
+                            <span class="micro-val text-primary" id="stat-extraction-words">0</span>
+                            <span class="micro-lbl"><i class="fa-solid fa-book-open"></i> کلمات</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Extraction Results & Export Toolbar -->
+            <div class="card results-card" id="extraction-results-card">
+                <div class="table-toolbar">
+                    <div class="toolbar-left">
+                        <span class="toolbar-title"><i class="fa-solid fa-newspaper"></i> مستندات استخراج‌شده</span>
+                    </div>
+
+                    <div class="toolbar-right export-toolbar">
+                        <span class="toolbar-hint">دریافت خروجی:</span>
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-outline btn-sm btn-export" id="btn-export-json" data-format="json" disabled title="دانلود فرمت استاندارد JSON">
+                                <i class="fa-solid fa-file-code"></i> <span>JSON</span>
+                            </button>
+                            <button type="button" class="btn btn-outline btn-sm btn-export" id="btn-export-jsonl" data-format="jsonl" disabled title="دانلود فرمت خطی JSONL">
+                                <i class="fa-solid fa-layer-group"></i> <span>JSONL</span>
+                            </button>
+                            <button type="button" class="btn btn-outline btn-sm btn-export" id="btn-export-markdown" data-format="markdown" disabled title="دانلود مقالات مارک‌داون">
+                                <i class="fa-brands fa-markdown"></i> <span>Markdown</span>
+                            </button>
+                            <button type="button" class="btn btn-outline btn-sm btn-export" id="btn-export-text" data-format="text" disabled title="دانلود متن خام">
+                                <i class="fa-solid fa-file-lines"></i> <span>Text</span>
+                            </button>
+                        </div>
+
+                        <button type="button" class="btn btn-ai btn-sm" id="btn-goto-ai-from-results" title="ارسال این اسناد به خط لوله هوش مصنوعی و RAG">
+                            <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            <span>انتقال به استودیوی RAG</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="table-responsive">
+                    <table class="data-table" id="table-extraction">
+                        <thead>
+                            <tr>
+                                <th class="col-url" scope="col">نشانی صفحه (URL)</th>
+                                <th class="col-title" scope="col">عنوان مستند</th>
+                                <th class="col-status" scope="col">وضعیت</th>
+                                <th class="col-engine" scope="col">موتور / نوع</th>
+                                <th class="col-words" scope="col">کلمات</th>
+                                <th class="col-quality" scope="col">شاخص کیفیت</th>
+                                <th class="col-actions" scope="col">پیش‌نمایش</th>
+                            </tr>
+                        </thead>
+                        <tbody id="extraction-table-body">
+                            <tr class="empty-state-row">
+                                <td colspan="7">
+                                    <div class="empty-state">
+                                        <div class="empty-icon"><i class="fa-solid fa-file-invoice"></i></div>
+                                        <h4>هنوز هیچ صفحه‌ای استخراج نشده است</h4>
+                                        <p>نشانی‌های مورد نظر را اضافه کرده و دکمه «شروع عملیات استخراج» را بزنید.</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="table-footer-minimal">
+                    <span class="footer-count">تعداد مستندات: <strong id="extraction-showing-count">0</strong> مورد</span>
+                </div>
+            </div>
+        </section>
+
+        <!-- ============================================== -->
+        <!-- TAB 3: AI & RAG STUDIO (استودیوی هوش مصنوعی)  -->
+        <!-- ============================================== -->
+        <section class="tab-content" id="tab-content-ai" role="tabpanel" aria-labelledby="tab-btn-ai">
+            
+            <!-- Connection & Configuration Bar -->
+            <div class="card ai-studio-card">
+                <div class="card-header-compact">
+                    <div class="card-title-group">
+                        <div class="title-icon-box ai-icon-box">
+                            <i class="fa-solid fa-wand-magic-sparkles title-icon-ai"></i>
+                        </div>
+                        <div>
+                            <h2>استودیوی آماده‌سازی هوش مصنوعی و بازیابی اطلاعات (RAG)</h2>
+                            <span class="card-subtitle">تقطیع معنایی، وکتورسازی و ساختاردهی راستی‌آزمایی‌شده برای پایگاه‌های برداری</span>
+                        </div>
+                    </div>
+                    <div class="ai-job-indicator">
+                        <span class="metric-chip"><i class="fa-solid fa-fingerprint"></i> کار فعال: <code id="ai-studio-job-id">-</code></span>
+                        <span class="badge badge-info" id="ai-studio-doc-count">0 سند</span>
+                    </div>
+                </div>
+
+                <div class="card-body-compact">
+                    <!-- Status Banner -->
+                    <div class="ai-api-status" id="ai-api-status-banner">
+                        <div class="status-checking" id="ai-status-checking">
+                            <i class="fa-solid fa-spinner fa-spin"></i>
+                            <span>در حال بررسی اتصال به ارائه‌دهنده هوش مصنوعی...</span>
+                        </div>
+                        <div class="status-ready hidden" id="ai-status-ready">
+                            <i class="fa-solid fa-circle-check text-success"></i>
+                            <span>ارائه‌دهنده هوش مصنوعی متصل است. تمام مدل‌های LLM و Embedding فعال هستند.</span>
+                        </div>
+                        <div class="status-no-key hidden" id="ai-status-no-key">
+                            <i class="fa-solid fa-triangle-exclamation text-warning"></i>
+                            <span>کلید <code>CRAWLBOT_OPENAI_API_KEY</code> در فایل <code>.env</code> تنظیم نشده است. <strong>قابلیت تقطیع (Chunking) کاملاً کار می‌کند</strong>.</span>
+                        </div>
+                    </div>
+
+                    <!-- Config Badges -->
+                    <div class="ai-config-badges">
+                        <div class="ai-cfg-badge" title="آدرس ارائه‌دهنده (OpenAI یا ارائه‌دهنده سازگار)">
+                            <i class="fa-solid fa-link"></i>
+                            <span class="cfg-lbl">Base URL:</span>
+                            <code id="ai-status-base-url">https://api.openai.com/v1</code>
+                        </div>
+                        <div class="ai-cfg-badge" title="مدل زبان بزرگ جهت ساختاردهی RAG">
+                            <i class="fa-solid fa-brain"></i>
+                            <span class="cfg-lbl">مدل LLM:</span>
+                            <strong id="ai-status-llm-model">gpt-4o-mini</strong>
+                        </div>
+                        <div class="ai-cfg-badge" title="مدل اِمبدینگ جهت ساخت بردارهای متراکم">
+                            <i class="fa-solid fa-network-wired"></i>
+                            <span class="cfg-lbl">مدل Embedding:</span>
+                            <strong id="ai-status-embed-model">text-embedding-3-small</strong>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Master Pipeline Banner -->
+            <div class="card ai-master-pipeline-card">
+                <div class="pipeline-master-bar">
+                    <div class="pipeline-checks">
+                        <label class="chip-checkbox">
+                            <input type="checkbox" id="check-enable-rag" checked />
+                            <span class="chip-box"><i class="fa-solid fa-wand-sparkles"></i> ۱. ساختاردهی با LLM + راستی‌آزمایی</span>
+                        </label>
+                        <label class="chip-checkbox">
+                            <input type="checkbox" id="check-enable-chunking" checked />
+                            <span class="chip-box"><i class="fa-solid fa-scissors"></i> ۲. تقطیع متن (Text Chunking)</span>
+                        </label>
+                        <label class="chip-checkbox">
+                            <input type="checkbox" id="check-enable-embedding" checked />
+                            <span class="chip-box"><i class="fa-solid fa-network-wired"></i> ۳. وکتورسازی (Vector Embedding)</span>
+                        </label>
+                    </div>
+
+                    <div class="pipeline-actions">
+                        <button type="button" class="btn btn-ai btn-lg" id="btn-run-ai" title="اجرای متوالی مراحل انتخاب‌شده">
+                            <i class="fa-solid fa-bolt"></i>
+                            <span>اجرای یکپارچه خط لوله</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Progress Steps -->
+                <div class="ai-progress-section hidden" id="ai-progress-section">
+                    <div class="ai-step">
+                        <div class="ai-step-icon pending" id="ai-step-rag-icon"><i class="fa-solid fa-wand-sparkles"></i></div>
+                        <div class="ai-step-info">
+                            <span class="ai-step-name">۱. ساختاردهی LLM</span>
+                            <span class="ai-step-status" id="ai-step-rag-status">در انتظار...</span>
+                        </div>
+                    </div>
+                    <div class="ai-step-connector"></div>
+                    <div class="ai-step">
+                        <div class="ai-step-icon pending" id="ai-step-chunking-icon"><i class="fa-solid fa-scissors"></i></div>
+                        <div class="ai-step-info">
+                            <span class="ai-step-name">۲. تقطیع متن (Chunking)</span>
+                            <span class="ai-step-status" id="ai-step-chunking-status">در انتظار...</span>
+                        </div>
+                    </div>
+                    <div class="ai-step-connector"></div>
+                    <div class="ai-step">
+                        <div class="ai-step-icon pending" id="ai-step-embedding-icon"><i class="fa-solid fa-network-wired"></i></div>
+                        <div class="ai-step-info">
+                            <span class="ai-step-name">۳. وکتورسازی (Embedding)</span>
+                            <span class="ai-step-status" id="ai-step-embedding-status">در انتظار...</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Output Stats -->
+                <div class="ai-stats hidden" id="ai-stats-panel">
+                    <div class="ai-stat-item">
+                        <i class="fa-solid fa-wand-sparkles"></i>
+                        <span class="ai-stat-label">اسناد غنی‌شده RAG:</span>
+                        <strong id="ai-stat-enhanced-value">-</strong>
+                    </div>
+                    <div class="ai-stat-item">
+                        <i class="fa-solid fa-scissors"></i>
+                        <span class="ai-stat-label">تعداد قطعات (Chunks):</span>
+                        <strong id="ai-stat-chunks-value">-</strong>
+                    </div>
+                    <div class="ai-stat-item">
+                        <i class="fa-solid fa-network-wired"></i>
+                        <span class="ai-stat-label">بردارهای تولیدشده:</span>
+                        <strong id="ai-stat-embedded-value">-</strong>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 3 Standalone Feature Cards Grid -->
+            <div class="ai-features-three-grid">
+                
+                <!-- CARD 1: LLM RAG Structuring (With Automated Fact-Checking & Evidence) -->
+                <div class="card ai-feature-box" id="box-llm-rag">
+                    <div class="ai-feature-header">
+                        <div class="feature-title-group">
+                            <div class="feature-num-icon"><i class="fa-solid fa-wand-magic-sparkles"></i></div>
+                            <div>
+                                <h3>ساختاردهی دقیق RAG با LLM</h3>
+                                <span class="feature-subtitle">مدل: <strong id="card-llm-model-label">gpt-4o-mini</strong></span>
+                            </div>
+                        </div>
+                        <span class="badge badge-info-outline">API Key</span>
+                    </div>
+
+                    <div class="ai-feature-body">
+                        <!-- Verifiability Highlight Pill -->
+                        <div class="verification-badge-box">
+                            <i class="fa-solid fa-shield-check text-success"></i>
+                            <div>
+                                <strong>راستی‌آزمایی خودکار (Grounding & Fact-Check)</strong>
+                                <p>هر پاسخ دارای Evidence مستند از متن است؛ تمامی اعداد، تاریخ‌ها و اسامی به صورت خودکار با متن منبع تطبیق داده می‌شوند.</p>
+                            </div>
+                        </div>
+
+                        <div class="feature-feature-list">
+                            <div class="feature-list-item"><i class="fa-solid fa-check text-success"></i> خلاصه‌سازی تحلیلی ۲ الی ۳ جمله‌ای بدون توهم</div>
+                            <div class="feature-list-item"><i class="fa-solid fa-check text-success"></i> استخراج ۵ الی ۱۰ کلیدواژه موضوعی دقیق</div>
+                            <div class="feature-list-item"><i class="fa-solid fa-check text-success"></i> تولید جفت‌های پرسش و پاسخ (Q&A) با مدرک استناد (Evidence)</div>
+                        </div>
+                        
+                        <div class="feature-action-row">
+                            <button type="button" class="btn btn-primary btn-block" id="btn-run-only-llm">
+                                <i class="fa-solid fa-play"></i>
+                                <span>اجرای ساختاردهی و راستی‌آزمایی با LLM</span>
+                            </button>
+                        </div>
+
+                        <div class="feature-export-row">
+                            <span class="export-hint">دریافت خروجی‌های ساختاریافته:</span>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-outline btn-sm btn-ai-export" id="btn-export-rag-json" disabled title="دانلود خروجی دقیق JSON شامل خلاصه‌ها، Q&A و گزارش راستی‌آزمایی">
+                                    <i class="fa-solid fa-file-code"></i> <span>RAG JSON</span>
+                                </button>
+                                <button type="button" class="btn btn-outline btn-sm btn-ai-export" id="btn-export-rag-jsonl" disabled title="دانلود فرمت خطی JSONL">
+                                    <i class="fa-solid fa-layer-group"></i> <span>JSONL</span>
+                                </button>
+                                <button type="button" class="btn btn-outline btn-sm btn-ai-export" id="btn-export-rag-markdown" disabled title="دانلود مقالات مارک‌داون با هدر Frontmatter و Evidence">
+                                    <i class="fa-brands fa-markdown"></i> <span>Markdown (ZIP)</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CARD 2: Text Chunking (100% Offline & Free) -->
+                <div class="card ai-feature-box" id="box-chunking">
+                    <div class="ai-feature-header">
+                        <div class="feature-title-group">
+                            <div class="feature-num-icon"><i class="fa-solid fa-scissors"></i></div>
+                            <div>
+                                <h3>تقطیع متن (Text Chunking)</h3>
+                                <span class="feature-subtitle">تبدیل به قطعات استاندارد پایگاه دانش</span>
+                            </div>
+                        </div>
+                        <span class="badge badge-success-outline">کاملاً آفلاین و رایگان</span>
+                    </div>
+
+                    <div class="ai-feature-body">
+                        <p class="feature-desc-text">تقطیع هوشمند با حفظ کانتکست تیترهای H1 تا H3 و همپوشانی کاراکتری بین قطعات متوالی جهت جلوگیری از گسستگی کانتکست.</p>
+
+                        <div class="chunking-form">
+                            <div class="form-group-rounded">
+                                <label for="select-chunk-strategy" class="form-label-rounded">استراتژی تقطیع:</label>
+                                <select id="select-chunk-strategy" class="form-control">
+                                    <option value="semantic_heading" selected>عنوان معنایی (Semantic Heading) — بر اساس تیترها</option>
+                                    <option value="paragraph">پاراگراف طبیعی (Paragraph) — مرز پاراگراف‌ها</option>
+                                    <option value="sentence">جمله (Sentence) — پایان جملات فارسی و انگلیسی</option>
+                                    <option value="fixed_size">اندازه ثابت (Fixed Size) — پنجره کاراکتری</option>
+                                </select>
+                            </div>
+                            <div class="form-grid-2">
+                                <div class="form-group-rounded">
+                                    <label for="input-chunk-size" class="form-label-rounded">اندازه قطعه (کاراکتر):</label>
+                                    <input type="number" id="input-chunk-size" class="form-control" value="1000" min="100" max="8000" step="50" />
+                                </div>
+                                <div class="form-group-rounded">
+                                    <label for="input-chunk-overlap" class="form-label-rounded">همپوشانی (Overlap):</label>
+                                    <input type="number" id="input-chunk-overlap" class="form-control" value="150" min="0" max="500" step="25" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="feature-action-row">
+                            <button type="button" class="btn btn-primary btn-block" id="btn-run-only-chunking">
+                                <i class="fa-solid fa-play"></i>
+                                <span>اجرای تقطیع متن (Chunking)</span>
+                            </button>
+                        </div>
+
+                        <div class="feature-export-row">
+                            <span class="export-hint">دریافت فایل‌های قطعات:</span>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-outline btn-sm btn-ai-export" id="btn-export-chunks-jsonl" disabled title="دانلود قطعات به فرمت JSON Lines">
+                                    <i class="fa-solid fa-layer-group"></i> <span>Chunks JSONL</span>
+                                </button>
+                                <button type="button" class="btn btn-outline btn-sm btn-ai-export" id="btn-export-chunks-json" disabled title="دانلود قطعات به فرمت JSON">
+                                    <i class="fa-solid fa-file-code"></i> <span>Chunks JSON</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- CARD 3: Vector Embedding -->
+                <div class="card ai-feature-box" id="box-embedding">
+                    <div class="ai-feature-header">
+                        <div class="feature-title-group">
+                            <div class="feature-num-icon"><i class="fa-solid fa-network-wired"></i></div>
+                            <div>
+                                <h3>جاسازی بردار (Vector Embedding)</h3>
+                                <span class="feature-subtitle">مدل: <strong id="card-embed-model-label">text-embedding-3-small</strong></span>
+                            </div>
+                        </div>
+                        <span class="badge badge-info-outline">API Key</span>
+                    </div>
+
+                    <div class="ai-feature-body">
+                        <p class="feature-desc-text">تولید بردارهای متراکم معنایی ۱۵۳۶ بعدی به صورت دسته‌ای با تلاش مجدد خودکار، آماده بارگذاری مستقیم در پایگاه‌های برداری.</p>
+
+                        <div class="ai-embedding-info">
+                            <div class="ai-model-badge">
+                                <i class="fa-brands fa-openai"></i>
+                                <span>ابعاد وکتور: <strong>۱۵۳۶</strong> · مدل: <strong id="badge-embed-model-name">text-embedding-3-small</strong></span>
+                            </div>
+                        </div>
+
+                        <div class="feature-action-row">
+                            <button type="button" class="btn btn-primary btn-block" id="btn-run-only-embedding">
+                                <i class="fa-solid fa-play"></i>
+                                <span>تولید بردارهای Embedding</span>
+                            </button>
+                        </div>
+
+                        <div class="feature-export-row">
+                            <span class="export-hint">خروجی پایگاه داده برداری:</span>
+                            <div class="btn-group">
+                                <button type="button" class="btn btn-ai-export btn-sm btn-block" id="btn-export-chunks-vectors" disabled title="دانلود فایل JSONL شامل متن، متادیتا و آرایه بردار ۱۵۳۶ عددی">
+                                    <i class="fa-solid fa-network-wired"></i>
+                                    <span>دانلود Chunks + وکتورها (JSONL)</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Terminal / Code Preview Box -->
+            <div class="card ai-preview-card" id="ai-preview-card">
+                <div class="card-header-compact">
+                    <div class="card-title-group">
+                        <div class="title-icon-box">
+                            <i class="fa-solid fa-code title-icon"></i>
+                        </div>
+                        <div>
+                            <h2>پیش‌نمایش خروجی زنده خط لوله RAG</h2>
+                            <span class="card-subtitle">بررسی آنلاین ساختار JSON، جفت‌های Q&A با مدرک استناد (Evidence) و قطعات Chunks</span>
+                        </div>
+                    </div>
+                    <div class="preview-toolbar-actions">
+                        <span class="preview-mode-tag" id="ai-preview-status-tag">آماده</span>
+                    </div>
+                </div>
+                <div class="card-body-compact">
+                    <div class="ai-preview-tabs">
+                        <button type="button" class="btn btn-sm btn-outline active" id="tab-preview-json"><i class="fa-solid fa-file-code"></i> RAG JSON + راستی‌آزمایی</button>
+                        <button type="button" class="btn btn-sm btn-outline" id="tab-preview-chunks"><i class="fa-solid fa-scissors"></i> قطعات Chunks</button>
+                    </div>
+                    <div class="ai-preview-content">
+                        <pre class="ai-preview-code" id="ai-preview-code">// داده‌های خروجی پس از اجرای پردازش در این بخش نمایش داده می‌شوند...</pre>
+                    </div>
+                </div>
+            </div>
+
+        </section>
+    </main>
+
+    <!-- Document Preview Modal Dialog -->
+    <div class="modal-overlay hidden" id="preview-modal" aria-hidden="true" role="dialog" aria-labelledby="preview-modal-title">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-header">
+                <div class="modal-title-box">
+                    <i class="fa-solid fa-eye modal-icon"></i>
+                    <h3 id="preview-modal-title">پیش‌نمایش محتوای استخراج‌شده</h3>
+                </div>
+                <button type="button" class="btn-close-modal" id="btn-close-preview-modal" aria-label="بستن پنجره">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <div class="preview-meta-panel">
+                    <div class="meta-item">
+                        <span class="meta-label">نشانی صفحه:</span>
+                        <a href="#" target="_blank" rel="noopener noreferrer" id="modal-doc-url" class="meta-link" dir="ltr">-</a>
+                    </div>
+                    <div class="meta-row">
+                        <div class="meta-item">
+                            <span class="meta-label">وضعیت:</span>
+                            <span id="modal-doc-status" class="badge badge-secondary">-</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">موتور استخراج:</span>
+                            <span id="modal-doc-engine" class="badge badge-info">-</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">نوع صفحه:</span>
+                            <span id="modal-doc-page-type" class="badge badge-secondary">-</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">تعداد کلمات:</span>
+                            <span id="modal-doc-wordcount" class="meta-value">0</span>
+                        </div>
+                        <div class="meta-item">
+                            <span class="meta-label">شاخص کیفیت:</span>
+                            <span id="modal-doc-quality" class="meta-value">-</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="preview-content-box">
+                    <label class="preview-content-label">متن تمیزشده و استخراج‌شده:</label>
+                    <div class="preview-text-container" id="modal-doc-content" dir="auto"></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-copy-preview-text">
+                    <i class="fa-solid fa-copy"></i>
+                    <span>کپی کردن متن</span>
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-dismiss-preview-modal">
+                    <span>بستن</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Error Modal Dialog -->
+    <div class="modal-overlay hidden" id="error-modal" aria-hidden="true" role="dialog" aria-labelledby="error-modal-title">
+        <div class="modal-dialog">
+            <div class="modal-header modal-header-danger">
+                <div class="modal-title-box">
+                    <i class="fa-solid fa-triangle-exclamation modal-icon"></i>
+                    <h3 id="error-modal-title">خطا در اجرای فرآیند</h3>
+                </div>
+                <button type="button" class="btn-close-modal" id="btn-close-error-modal" aria-label="بستن پنجره">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+            </div>
+            <div class="modal-body">
+                <p id="error-modal-message">پیام خطا در این بخش نمایش داده خواهد شد.</p>
+                <div class="error-detail-box hidden" id="error-modal-details-box">
+                    <pre class="error-detail-code" id="error-modal-details"></pre>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-dismiss-error-modal">
+                    <span>متوجه شدم</span>
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification Container -->
+    <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+    <!-- Application Script -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

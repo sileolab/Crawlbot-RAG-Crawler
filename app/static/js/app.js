@@ -2107,7 +2107,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 return;
             }
 
-            const strategy = document.getElementById('select-chunk-strategy')?.value || 'semantic_heading';
+            const strategy = document.getElementById('select-chunk-strategy')?.value || 'auto';
             const chunkSize = parseInt(document.getElementById('input-chunk-size')?.value || '1000', 10);
             const overlap = parseInt(document.getElementById('input-chunk-overlap')?.value || '150', 10);
 
@@ -2132,7 +2132,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
                 // Update Preview to chunks tab
                 updateLivePreview('chunks');
-                showToast(`تقطیع با موفقیت انجام شد: ${count} قطعه (Chunk) با استراتژی ${strategy} ایجاد گردید.`, 'success');
+                const stratName = res.data?.applied_strategy ? `${res.data.strategy} (${res.data.applied_strategy})` : (res.data?.strategy || strategy);
+                showToast(`تقطیع با موفقیت انجام شد: ${count} قطعه (Chunk) با استراتژی ${stratName} ایجاد گردید.`, 'success');
             } catch (err) {
                 showToast(`خطا در تقطیع متن: ${err.message}`, 'error');
             } finally {
@@ -2165,7 +2166,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // If chunks haven't been generated yet, do chunking first automatically
                 if (!aiState.chunksReady) {
                     showToast('ابتدا در حال تقطیع خودکار متن برای ایجاد چانک‌ها...', 'info');
-                    const strategy = document.getElementById('select-chunk-strategy')?.value || 'semantic_heading';
+                    const strategy = document.getElementById('select-chunk-strategy')?.value || 'auto';
                     const chunkSize = parseInt(document.getElementById('input-chunk-size')?.value || '1000', 10);
                     const overlap = parseInt(document.getElementById('input-chunk-overlap')?.value || '150', 10);
                     const chunkRes = await aiApi.chunk(jobId, strategy, chunkSize, overlap);
@@ -2254,14 +2255,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (doChunk) {
                 setAIStep('chunking', AI_STEP_STATES.running('در حال تقطیع متن...'));
                 try {
-                    const strategy = document.getElementById('select-chunk-strategy')?.value || 'semantic_heading';
+                    const strategy = document.getElementById('select-chunk-strategy')?.value || 'auto';
                     const chunkSize = parseInt(document.getElementById('input-chunk-size')?.value || '1000', 10);
                     const overlap = parseInt(document.getElementById('input-chunk-overlap')?.value || '150', 10);
                     const result = await aiApi.chunk(jobId, strategy, chunkSize, overlap);
                     chunkCount = result.data?.total_chunks || 0;
                     aiState.chunksReady = true;
                     aiState.lastChunksData = result.data;
-                    setAIStep('chunking', AI_STEP_STATES.done(`${chunkCount} قطعه تولید شد ✓`));
+                    const stratDesc = result.data?.applied_strategy ? ` [${result.data.applied_strategy}]` : '';
+                    setAIStep('chunking', AI_STEP_STATES.done(`${chunkCount} قطعه تولید شد${stratDesc} ✓`));
                     document.getElementById('btn-export-chunks-jsonl').disabled = false;
                     document.getElementById('btn-export-chunks-json').disabled = false;
                 } catch (err) {

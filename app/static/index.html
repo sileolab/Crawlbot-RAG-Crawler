@@ -764,16 +764,17 @@
                     </div>
 
                     <div class="ai-feature-body">
-                        <p class="feature-desc-text">تقطیع هوشمند با حفظ کانتکست تیترهای H1 تا H3 و همپوشانی کاراکتری بین قطعات متوالی جهت جلوگیری از گسستگی کانتکست.</p>
+                        <p class="feature-desc-text">تقطیع هوشمند اسناد متناسب با ساختار محتوا، حفظ سلسله‌مراتب تیترهای H1 تا H6، جلوگیری از بریدن کلمات و همپوشانی پیوسته.</p>
 
                         <div class="chunking-form">
                             <div class="form-group-rounded">
                                 <label for="select-chunk-strategy" class="form-label-rounded">استراتژی تقطیع:</label>
                                 <select id="select-chunk-strategy" class="form-control">
-                                    <option value="semantic_heading" selected>عنوان معنایی (Semantic Heading) — بر اساس تیترها</option>
-                                    <option value="paragraph">پاراگراف طبیعی (Paragraph) — مرز پاراگراف‌ها</option>
-                                    <option value="sentence">جمله (Sentence) — پایان جملات فارسی و انگلیسی</option>
-                                    <option value="fixed_size">اندازه ثابت (Fixed Size) — پنجره کاراکتری</option>
+                                    <option value="auto" selected>انتخاب خودکار (Auto) — هوشمند بر اساس ساختار و نوع صفحه (پیشنهادی)</option>
+                                    <option value="semantic_heading">عنوان معنایی (Semantic Heading) — ساختار تیترهای H1 تا H6</option>
+                                    <option value="paragraph">پاراگراف طبیعی (Paragraph) — مرز پاراگراف‌ها با تفکیک قطعات طولانی</option>
+                                    <option value="sentence">جمله (Sentence) — پایان جملات با حفظ اعشار و پیوندها</option>
+                                    <option value="fixed_size">اندازه ثابت (Fixed Size) — پنجره کاراکتری با حفظ کلمات و نیم‌فاصله</option>
                                 </select>
                             </div>
                             <div class="form-grid-2">

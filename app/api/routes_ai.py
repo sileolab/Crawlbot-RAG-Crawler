@@ -108,17 +108,43 @@ async def chunk_documents(request: dict[str, Any]) -> ApiResponse:
             detail="این کار هنوز سند استخراج‌شده‌ای ندارد. ابتدا عملیات استخراج را انجام دهید.",
         )
 
-    strategy = request.get("strategy", "paragraph")
-    chunk_size = int(request.get("chunk_size", 1000))
-    overlap = int(request.get("overlap", 150))
+    strategy = str(request.get("strategy", "auto")).strip().lower()
+    try:
+        chunk_size = int(request.get("chunk_size", 1000))
+        overlap = int(request.get("overlap", 150))
+    except (ValueError, TypeError):
+        raise HTTPException(
+            status_code=400,
+            detail="مقادیر chunk_size و overlap باید اعداد صحیح معتبر باشند.",
+        )
     category = request.get("category") or None
 
     # Validate strategy
-    allowed = {"paragraph", "sentence", "fixed_size", "semantic_heading"}
+    allowed = {"auto", "paragraph", "sentence", "fixed_size", "semantic_heading"}
     if strategy not in allowed:
         raise HTTPException(
             status_code=400,
             detail=f"استراتژی '{strategy}' نامعتبر است. موارد مجاز: {', '.join(sorted(allowed))}",
+        )
+
+    # Validate chunk size bounds
+    if chunk_size < 100 or chunk_size > 8000:
+        raise HTTPException(
+            status_code=400,
+            detail=f"اندازه قطعه (chunk_size) باید بین ۱۰۰ تا ۸۰۰۰ کاراکتر باشد. مقدار ارسالی: {chunk_size}",
+        )
+
+    # Validate overlap bounds
+    if overlap < 0 or overlap > 500:
+        raise HTTPException(
+            status_code=400,
+            detail=f"میزان همپوشانی (overlap) باید بین ۰ تا ۵۰۰ کاراکتر باشد. مقدار ارسالی: {overlap}",
+        )
+
+    if overlap >= chunk_size:
+        raise HTTPException(
+            status_code=400,
+            detail=f"میزان همپوشانی ({overlap}) نمی‌تواند بزرگتر یا مساوی اندازه قطعه ({chunk_size}) باشد.",
         )
 
     try:
@@ -140,10 +166,14 @@ async def chunk_documents(request: dict[str, Any]) -> ApiResponse:
         # Store chunks on the job for later embedding/export
         manager.store_chunks(job_id, all_chunks)
 
+        applied_set = list({c.metadata.get("strategy") for c in all_chunks if c.metadata.get("strategy")})
+        applied_strategy = applied_set[0] if len(applied_set) == 1 else (", ".join(applied_set) if applied_set else strategy)
+
         chunk_stats = {
             "total_chunks": len(all_chunks),
             "total_docs_chunked": len(eligible),
             "strategy": strategy,
+            "applied_strategy": applied_strategy,
             "chunk_size": chunk_size,
             "overlap": overlap,
             "avg_chunk_chars": (
@@ -151,11 +181,18 @@ async def chunk_documents(request: dict[str, Any]) -> ApiResponse:
                 if all_chunks else 0
             ),
         }
-        logger.info("Chunked job %s: %d chunks from %d docs.", job_id, len(all_chunks), len(eligible))
+        logger.info(
+            "Chunked job %s: %d chunks from %d docs (requested=%s, applied=%s).",
+            job_id,
+            len(all_chunks),
+            len(eligible),
+            strategy,
+            applied_strategy,
+        )
 
         return ApiResponse.ok(
             data={"job_id": job_id, **chunk_stats},
-            message=f"تقطیع با موفقیت انجام شد. {len(all_chunks)} قطعه از {len(eligible)} سند تولید شد.",
+            message=f"تقطیع با موفقیت انجام شد. {len(all_chunks)} قطعه از {len(eligible)} سند تولید شد (استراتژی: {applied_strategy}).",
         )
 
     except HTTPException:

@@ -160,7 +160,9 @@ class PageClassifier:
             except Exception:
                 continue
 
-        # B. Check for SPA characteristics (JS-dependent empty shell)
+        # B. Check for SPA characteristics (JS-dependent empty shell or loading screen)
+        from app.services.loading_detector import has_loading_dom, is_loading_text
+
         scripts = soup.find_all("script")
         script_count = len(scripts)
         body = soup.body
@@ -170,8 +172,9 @@ class PageClassifier:
         # Check for typical SPA mounting points with very sparse initial text
         spa_mounts = soup.find(id=lambda i: i in ("root", "app", "__next", "__nuxt", "svelte-app"))
         has_noscript = bool(soup.find("noscript", string=re.compile(r"enable javascript", re.I)))
+        is_loader = is_loading_text(body_text) or has_loading_dom(html)
 
-        if (spa_mounts or has_noscript) and text_len < 300 and script_count >= 2:
+        if ((spa_mounts or has_noscript) and text_len < 300 and script_count >= 2) or (is_loader and text_len < 500):
             return PAGE_TYPE_SPA
 
         # C. Check for Documentation signals (high codeblock count, sidebar navigation)

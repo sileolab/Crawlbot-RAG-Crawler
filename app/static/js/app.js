@@ -818,6 +818,8 @@ async function startExtraction() {
     const renderMode = document.getElementById('select-render-mode')?.value || 'auto';
     const minQuality = parseInt(document.getElementById('input-min-quality-score')?.value || '40', 10);
     const concurrency = parseInt(document.getElementById('input-extraction-concurrency')?.value || '5', 10);
+    const loadingDelayVal = parseFloat(document.getElementById('input-loading-delay')?.value || '0');
+    const waitSelector = document.getElementById('input-wait-selector')?.value.trim() || '';
 
     const config = {
         urls: Array.from(state.extractionUrls),
@@ -829,7 +831,9 @@ async function startExtraction() {
         render_mode: renderMode,
         min_quality_score: minQuality,
         max_concurrency: concurrency,
-        concurrency: concurrency
+        concurrency: concurrency,
+        loading_delay: isNaN(loadingDelayVal) ? 0.0 : loadingDelayVal,
+        wait_for_selector: waitSelector || null
     };
 
     state.isExtracting = true;
@@ -1029,7 +1033,7 @@ function renderExtractionResults(docs) {
     docs.forEach((doc, idx) => {
         const url = doc.url || '';
         const title = doc.title || '(بدون عنوان)';
-        const docStatus = (doc.status || 'pending').toLowerCase();
+        const docStatus = (doc.status || doc.quality_status || 'pending').toLowerCase();
         const wordCount = doc.word_count !== undefined ? doc.word_count.toLocaleString('fa-IR') : '0';
 
         // Engine and Page Type Badges
@@ -1039,6 +1043,8 @@ function renderExtractionResults(docs) {
             engineBadge = `<span class="badge badge-info" style="font-size: 11px;"><i class="fa-solid fa-feather"></i> Trafilatura</span>`;
         } else if (engine.includes('beautifulsoup') || engine.includes('bs4')) {
             engineBadge = `<span class="badge badge-warning" style="font-size: 11px;"><i class="fa-solid fa-code"></i> BS4</span>`;
+        } else if (engine.includes('playwright') || engine.includes('playwrite')) {
+            engineBadge = `<span class="badge badge-success" style="font-size: 11px;"><i class="fa-solid fa-masks-theater"></i> Playwright</span>`;
         } else if (engine.includes('crawl4ai')) {
             engineBadge = `<span class="badge badge-primary" style="font-size: 11px;"><i class="fa-solid fa-robot"></i> Crawl4AI</span>`;
         }
@@ -1071,9 +1077,24 @@ function renderExtractionResults(docs) {
         } else if (['failed', 'error'].includes(docStatus)) {
             badgeClass = 'badge-failed';
             statusLabel = 'خطا';
-        } else {
+        } else if (docStatus === 'empty') {
+            badgeClass = 'badge-warning';
+            statusLabel = 'محتوای خالی';
+        } else if (docStatus === 'low_quality') {
+            badgeClass = 'badge-warning';
+            statusLabel = 'کیفیت پایین';
+        } else if (docStatus === 'blocked') {
+            badgeClass = 'badge-failed';
+            statusLabel = 'مسدود شده';
+        } else if (docStatus === 'duplicate') {
+            badgeClass = 'badge-secondary';
+            statusLabel = 'تکراری';
+        } else if (['running', 'in_progress', 'extracting'].includes(docStatus)) {
             badgeClass = 'badge-pending';
             statusLabel = 'در حال انجام';
+        } else {
+            badgeClass = 'badge-secondary';
+            statusLabel = docStatus || 'نامشخص';
         }
 
         rowsHtml += `
@@ -1417,8 +1438,30 @@ function openPreviewModal(doc) {
     }
     if (titleEl) titleEl.textContent = doc.title || 'پیش‌نمایش محتوای استخراج‌شده';
     if (statusEl) {
-        statusEl.textContent = doc.status || 'موفق';
-        statusEl.className = 'badge ' + (doc.status === 'failed' ? 'badge-failed' : 'badge-success');
+        const s = (doc.status || doc.quality_status || '').toLowerCase();
+        let modalStatusLabel = 'استخراج شد';
+        let modalBadgeClass = 'badge-success';
+        if (['failed', 'error'].includes(s)) {
+            modalBadgeClass = 'badge-failed';
+            modalStatusLabel = 'خطا';
+        } else if (s === 'blocked') {
+            modalBadgeClass = 'badge-failed';
+            modalStatusLabel = 'مسدود شده';
+        } else if (s === 'empty') {
+            modalBadgeClass = 'badge-warning';
+            modalStatusLabel = 'محتوای خالی';
+        } else if (s === 'low_quality') {
+            modalBadgeClass = 'badge-warning';
+            modalStatusLabel = 'کیفیت پایین';
+        } else if (s === 'duplicate') {
+            modalBadgeClass = 'badge-secondary';
+            modalStatusLabel = 'تکراری';
+        } else if (['running', 'in_progress'].includes(s)) {
+            modalBadgeClass = 'badge-pending';
+            modalStatusLabel = 'در حال انجام';
+        }
+        statusEl.textContent = modalStatusLabel;
+        statusEl.className = 'badge ' + modalBadgeClass;
     }
     if (engineEl) {
         engineEl.textContent = doc.extractor_used || doc.extraction_method || 'ناشناخته';
@@ -1437,8 +1480,15 @@ function openPreviewModal(doc) {
     if (qualityEl) qualityEl.textContent = qDisplay;
 
     if (contentEl) {
-        const textToDisplay = doc.content_markdown || doc.content_text || doc.content || doc.text || '(محتوای متنی یافت نشد یا صفحه بدون متن اصلی است)';
-        contentEl.textContent = textToDisplay;
+        const textToDisplay = doc.content_markdown || doc.content_text || doc.content || doc.text;
+        if (textToDisplay && textToDisplay.trim()) {
+            contentEl.textContent = textToDisplay;
+        } else {
+            const warningsList = (doc.warnings && doc.warnings.length > 0)
+                ? '\n\nپیام‌ها و خطاهای ثبت‌شده:\n' + doc.warnings.map(w => '• ' + w).join('\n')
+                : '';
+            contentEl.textContent = '⚠️ هیچ محتوای متنی از این صفحه استخراج نشد.' + warningsList;
+        }
     }
 
     modal.classList.remove('hidden');

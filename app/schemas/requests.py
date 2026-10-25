@@ -57,6 +57,7 @@ class ExtractionStrategy(str, Enum):
     BEAUTIFUL_SOUP = "beautifulsoup"
     BS4 = "bs4"  # Alias for backward compatibility
     CRAWL4AI = "crawl4ai"
+    PLAYWRIGHT = "playwright"
     AUTO = "auto"
     COMPARE = "compare"
 
@@ -277,6 +278,16 @@ class ExtractionRequest(BaseModel):
         le=120.0,
         description="Request timeout per page in seconds.",
     )
+    loading_delay: float = Field(
+        default=0.0,
+        ge=0.0,
+        le=60.0,
+        description="Manual loading screen delay in seconds (gives SPAs and loading screens time to render).",
+    )
+    wait_for_selector: Optional[str] = Field(
+        default=None,
+        description="Optional CSS/XPath/JS selector to wait for before extracting dynamic content.",
+    )
 
     @model_validator(mode="before")
     @classmethod
@@ -287,12 +298,19 @@ class ExtractionRequest(BaseModel):
                 data["extraction_strategy"] = data["extractor"]
             if "strategy" in data and "extraction_strategy" not in data:
                 data["extraction_strategy"] = data["strategy"]
+            strat = str(data.get("extraction_strategy", "")).lower().strip()
+            if strat in ("playwrite", "pw", "playwright_engine"):
+                data["extraction_strategy"] = "playwright"
             if "mode" in data and "crawl_mode" not in data:
                 data["crawl_mode"] = data["mode"]
             if "concurrency" in data and "max_concurrency" not in data:
                 data["max_concurrency"] = data["concurrency"]
             if "timeout" in data and "request_timeout" not in data:
                 data["request_timeout"] = data["timeout"]
+            if "loading_wait" in data and "loading_delay" not in data:
+                data["loading_delay"] = data["loading_wait"]
+            if "wait_selector" in data and "wait_for_selector" not in data:
+                data["wait_for_selector"] = data["wait_selector"]
         return data
 
     @field_validator("urls")
@@ -375,7 +393,7 @@ class SingleExtractRequest(BaseModel):
     url: str = Field(description="URL to extract.")
     extraction_strategy: str = Field(
         default="auto",
-        description="Engine strategy: 'auto', 'trafilatura', 'beautifulsoup', 'crawl4ai', 'compare'.",
+        description="Engine strategy: 'auto', 'trafilatura', 'beautifulsoup', 'crawl4ai', 'playwright', 'compare'.",
     )
     crawl_mode: str = Field(
         default="single_page",
@@ -387,6 +405,8 @@ class SingleExtractRequest(BaseModel):
     )
     min_quality_score: int = Field(default=40, ge=0, le=100)
     timeout: float = Field(default=30.0, ge=1.0, le=120.0)
+    loading_delay: float = Field(default=0.0, ge=0.0, le=60.0, description="Manual delay in seconds for loading screens.")
+    wait_for_selector: Optional[str] = Field(default=None, description="Optional selector to wait for.")
 
     @field_validator("url")
     @classmethod
@@ -401,6 +421,8 @@ class CompareRequest(BaseModel):
 
     url: str = Field(description="URL to benchmark across Trafilatura, BeautifulSoup, and Crawl4AI.")
     timeout: float = Field(default=30.0, ge=1.0, le=120.0)
+    loading_delay: float = Field(default=0.0, ge=0.0, le=60.0, description="Manual delay in seconds for loading screens.")
+    wait_for_selector: Optional[str] = Field(default=None, description="Optional selector to wait for.")
 
     @field_validator("url")
     @classmethod

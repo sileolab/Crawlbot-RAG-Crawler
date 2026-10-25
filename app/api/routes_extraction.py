@@ -113,6 +113,8 @@ async def extract_single_url(request: SingleExtractRequest) -> ApiResponse:
         url=request.url,
         timeout=request.timeout,
         crawl_mode=request.crawl_mode,
+        loading_delay=request.loading_delay,
+        wait_for_selector=request.wait_for_selector,
     )
     return ApiResponse.ok(
         data=doc.model_dump(mode="json"),
@@ -130,6 +132,8 @@ async def compare_engines(request: CompareRequest) -> ApiResponse:
         url=request.url,
         timeout=request.timeout,
         crawl_mode="compare",
+        loading_delay=request.loading_delay,
+        wait_for_selector=request.wait_for_selector,
     )
     return ApiResponse.ok(
         data=doc.model_dump(mode="json"),

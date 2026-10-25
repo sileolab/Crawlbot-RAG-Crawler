@@ -37,6 +37,7 @@ from .content_cleaner import ContentCleaner
 from .extractors.base import EngineResult
 from .extractors.bs4_engine import BeautifulSoupEngine
 from .extractors.crawl4ai_engine import Crawl4AIEngine
+from .extractors.playwright_engine import PlaywrightEngine
 from .extractors.trafilatura_engine import TrafilaturaEngine
 from .link_discovery import LinkDiscovery
 from .page_classifier import (
@@ -50,6 +51,7 @@ from .page_classifier import (
     PAGE_TYPE_UNKNOWN,
     PageClassifier,
 )
+from .loading_detector import has_loading_dom, is_loading_text
 from .quality_checker import QualityChecker
 from .url_normalizer import URLNormalizer
 
@@ -89,6 +91,7 @@ class ContentExtractor:
         self.trafilatura_engine = TrafilaturaEngine()
         self.bs4_engine = BeautifulSoupEngine()
         self.crawl4ai_engine = Crawl4AIEngine()
+        self.playwright_engine = PlaywrightEngine()
 
     async def extract(
         self,
@@ -96,6 +99,8 @@ class ContentExtractor:
         timeout: float = 30.0,
         crawl_mode: str = "single_page",
         override_strategy: Optional[str] = None,
+        loading_delay: float = 0.0,
+        wait_for_selector: Optional[str] = None,
     ) -> ExtractedDocument:
         """Execute extraction pipeline for a single URL using configured or auto strategy.
 
@@ -104,15 +109,19 @@ class ContentExtractor:
             timeout: Request timeout in seconds.
             crawl_mode: Mode ('single_page', 'site_crawl', 'spa_capture', 'compare').
             override_strategy: Optional per-request extraction strategy override.
+            loading_delay: Manual delay in seconds to wait for initial loading screens.
+            wait_for_selector: Optional CSS/XPath selector to wait for before extraction.
 
         Returns:
             ExtractedDocument containing unified result, metadata, and quality report.
         """
         active_strategy = (override_strategy or self.strategy).lower().strip()
+        if active_strategy in ("playwrite", "pw", "playwright_engine"):
+            active_strategy = "playwright"
         if crawl_mode == "compare":
             active_strategy = "compare"
         elif crawl_mode == "spa_capture" and active_strategy == "auto":
-            active_strategy = "crawl4ai"
+            active_strategy = "playwright"
 
         # 1. Validate URL safety against SSRF and private network ranges
         is_safe, safety_reason = validate_url_safety(url)
@@ -132,21 +141,48 @@ class ContentExtractor:
                 ),
             )
 
-        # 2. If strategy is 'compare', run comparison pipeline across all 3 engines
-        if active_strategy == "compare":
-            return await self._run_compare_pipeline(url=url, timeout=timeout)
+        # 2. If strategy is 'compare', run comparison pipeline across engines
+        if active_strategy in ("compare", "compare_all"):
+            return await self._run_compare_pipeline(
+                url=url,
+                timeout=timeout,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
+                include_playwright=(active_strategy == "compare_all"),
+            )
 
-        # 3. Handle pure Crawl4AI mode directly if browser rendering is unconditionally forced
+        # 3. Handle pure browser modes directly if browser rendering is unconditionally forced
+        if active_strategy == "playwright" and self.render_mode != "never":
+            return await self._extract_via_playwright_direct(
+                url=url,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
+            )
+
         if active_strategy == "crawl4ai" and self.render_mode != "never":
-            return await self._extract_via_crawl4ai_direct(url=url)
+            return await self._extract_via_crawl4ai_direct(
+                url=url,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
+            )
 
         # 4. Fetch page HTML safely via HTTP GET
         fetch_res = await self._safe_fetch_html(url=url, timeout=timeout)
         if fetch_res.get("failed"):
-            # If standard HTTP fetch failed and strategy was crawl4ai or auto, try browser fallback
-            if active_strategy in ("crawl4ai", "auto"):
-                logger.info("HTTP fetch failed for %s, attempting Crawl4AI browser fallback", url)
-                return await self._extract_via_crawl4ai_direct(url=url)
+            # If standard HTTP fetch failed and strategy was playwright, crawl4ai or auto, try browser fallback
+            if active_strategy in ("playwright", "crawl4ai", "auto"):
+                logger.info("HTTP fetch failed for %s, attempting browser fallback", url)
+                if active_strategy == "playwright":
+                    return await self._extract_via_playwright_direct(
+                        url=url,
+                        loading_delay=loading_delay,
+                        wait_for_selector=wait_for_selector,
+                    )
+                return await self._extract_via_crawl4ai_direct(
+                    url=url,
+                    loading_delay=loading_delay,
+                    wait_for_selector=wait_for_selector,
+                )
 
             return ExtractedDocument(
                 url=url,
@@ -195,6 +231,36 @@ class ContentExtractor:
             best_result = res
             best_score = score
 
+            # If static engine captured only a loading screen, auto-promote to Crawl4AI
+            if self.render_mode != "never" and (
+                is_loading_text(res.text, title=res.title)
+                or (not res.has_content and has_loading_dom(html))
+            ):
+                logger.info("Trafilatura encountered a loading screen for %s. Auto-promoting to Crawl4AI browser capture...", final_url)
+                res_c4a = await self.crawl4ai_engine.extract(
+                    final_url,
+                    html=html,
+                    render_js=True,
+                    loading_delay=loading_delay,
+                    wait_for_selector=wait_for_selector,
+                )
+                score_c4a = self._score_engine_result(res_c4a, html)
+                attempts.append(
+                    ExtractionAttempt(
+                        engine="crawl4ai",
+                        status="success" if res_c4a.success else "failed",
+                        latency_ms=res_c4a.latency_ms,
+                        char_count=res_c4a.char_count,
+                        word_count=res_c4a.word_count,
+                        quality_score=score_c4a,
+                        reason="Bypassed loading screen via Crawl4AI",
+                        error=res_c4a.error,
+                    )
+                )
+                if score_c4a > best_score:
+                    best_result = res_c4a
+                    best_score = score_c4a
+
         elif active_strategy in ("beautifulsoup", "bs4"):
             res = self.bs4_engine.extract(html, final_url)
             score = self._score_engine_result(res, html)
@@ -212,11 +278,70 @@ class ContentExtractor:
             best_result = res
             best_score = score
 
+            # If static engine captured only a loading screen, auto-promote to Crawl4AI
+            if self.render_mode != "never" and (
+                is_loading_text(res.text, title=res.title)
+                or (not res.has_content and has_loading_dom(html))
+            ):
+                logger.info("BeautifulSoup encountered a loading screen for %s. Auto-promoting to Crawl4AI browser capture...", final_url)
+                res_c4a = await self.crawl4ai_engine.extract(
+                    final_url,
+                    html=html,
+                    render_js=True,
+                    loading_delay=loading_delay,
+                    wait_for_selector=wait_for_selector,
+                )
+                score_c4a = self._score_engine_result(res_c4a, html)
+                attempts.append(
+                    ExtractionAttempt(
+                        engine="crawl4ai",
+                        status="success" if res_c4a.success else "failed",
+                        latency_ms=res_c4a.latency_ms,
+                        char_count=res_c4a.char_count,
+                        word_count=res_c4a.word_count,
+                        quality_score=score_c4a,
+                        reason="Bypassed loading screen via Crawl4AI",
+                        error=res_c4a.error,
+                    )
+                )
+                if score_c4a > best_score:
+                    best_result = res_c4a
+                    best_score = score_c4a
+
         elif active_strategy in ("crawl4ai",):
-            res = await self.crawl4ai_engine.extract(final_url, html=html, render_js=True)
+            res = await self.crawl4ai_engine.extract(
+                final_url,
+                html=html,
+                render_js=True,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
+            )
             score = self._score_engine_result(res, html)
             att = ExtractionAttempt(
                 engine="crawl4ai",
+                status="success" if res.success else "failed",
+                latency_ms=res.latency_ms,
+                char_count=res.char_count,
+                word_count=res.word_count,
+                quality_score=score,
+                reason="Single engine execution",
+                error=res.error,
+            )
+            attempts.append(att)
+            best_result = res
+            best_score = score
+
+        elif active_strategy in ("playwright", "playwrite", "pw"):
+            res = await self.playwright_engine.extract(
+                final_url,
+                html=html,
+                render_js=True,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
+            )
+            score = self._score_engine_result(res, html)
+            att = ExtractionAttempt(
+                engine="playwright",
                 status="success" if res.success else "failed",
                 latency_ms=res.latency_ms,
                 char_count=res.char_count,
@@ -235,6 +360,8 @@ class ContentExtractor:
                 url=final_url,
                 html=html,
                 page_type=page_type,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
             )
 
         # 7. Construct final ExtractedDocument
@@ -266,12 +393,14 @@ class ContentExtractor:
         url: str,
         html: str,
         page_type: str,
+        loading_delay: float = 0.0,
+        wait_for_selector: Optional[str] = None,
     ) -> tuple[EngineResult, int, list[ExtractionAttempt]]:
         """Execute Auto Mode: selects primary engine and manages controlled fallbacks."""
         attempts: list[ExtractionAttempt] = []
 
-        # Step A: Choose primary engine based on page type classification
-        if page_type in (PAGE_TYPE_SPA, PAGE_TYPE_DASHBOARD):
+        # Step A: Choose primary engine based on page type classification or loader detection
+        if page_type in (PAGE_TYPE_SPA, PAGE_TYPE_DASHBOARD) or has_loading_dom(html):
             primary_engine_name = "crawl4ai"
         elif page_type in (PAGE_TYPE_PRODUCT, PAGE_TYPE_FAQ):
             primary_engine_name = "beautifulsoup"
@@ -279,7 +408,13 @@ class ContentExtractor:
             primary_engine_name = "trafilatura"
 
         # Step B: Run primary engine
-        primary_result = await self._run_single_engine(primary_engine_name, url, html)
+        primary_result = await self._run_single_engine(
+            primary_engine_name,
+            url,
+            html,
+            loading_delay=loading_delay,
+            wait_for_selector=wait_for_selector,
+        )
         primary_score = self._score_engine_result(primary_result, html)
 
         attempts.append(
@@ -311,16 +446,30 @@ class ContentExtractor:
         )
 
         # Step D: Determine fallback chain
-        fallback_order = [e for e in ["beautifulsoup", "trafilatura", "crawl4ai"] if e != primary_engine_name]
+        fallback_order = [e for e in ["beautifulsoup", "trafilatura", "playwright", "crawl4ai"] if e != primary_engine_name]
 
-        # If page has SPA indicators or very low text, prioritize crawl4ai
-        if "root" in html[:2000] or "<script" in html.lower() and len(primary_result.text or "") < 100:
-            if "crawl4ai" in fallback_order:
+        # If page has SPA indicators, loading screen, or very low text, prioritize playwright / crawl4ai
+        if (
+            "root" in html[:2000]
+            or ("<script" in html.lower() and len(primary_result.text or "") < 100)
+            or is_loading_text(primary_result.text, title=primary_result.title)
+            or has_loading_dom(html)
+        ):
+            if "playwright" in fallback_order:
+                fallback_order.remove("playwright")
+                fallback_order.insert(0, "playwright")
+            elif "crawl4ai" in fallback_order:
                 fallback_order.remove("crawl4ai")
                 fallback_order.insert(0, "crawl4ai")
 
         for fb_engine in fallback_order:
-            fb_result = await self._run_single_engine(fb_engine, url, html)
+            fb_result = await self._run_single_engine(
+                fb_engine,
+                url,
+                html,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
+            )
             fb_score = self._score_engine_result(fb_result, html)
 
             passed = fb_result.success and fb_score >= self.min_quality_score
@@ -347,8 +496,15 @@ class ContentExtractor:
 
         return best_result, best_score, attempts
 
-    async def _run_compare_pipeline(self, url: str, timeout: float) -> ExtractedDocument:
-        """Run all three engines on the same page and produce a side-by-side comparison report."""
+    async def _run_compare_pipeline(
+        self,
+        url: str,
+        timeout: float,
+        loading_delay: float = 0.0,
+        wait_for_selector: Optional[str] = None,
+        include_playwright: bool = False,
+    ) -> ExtractedDocument:
+        """Run all three (or four) engines on the same page and produce a side-by-side comparison report."""
         start_time = time.perf_counter()
         fetch_res = await self._safe_fetch_html(url=url, timeout=timeout)
         html = fetch_res.get("html", "")
@@ -398,7 +554,13 @@ class ContentExtractor:
         )
 
         # 3. Engine C: Crawl4AI
-        res_c4a = await self.crawl4ai_engine.extract(final_url, html=html, render_js=True)
+        res_c4a = await self.crawl4ai_engine.extract(
+            final_url,
+            html=html,
+            render_js=True,
+            loading_delay=loading_delay,
+            wait_for_selector=wait_for_selector,
+        )
         score_c4a = self._score_engine_result(res_c4a, html)
         results["crawl4ai"] = res_c4a
         scores["crawl4ai"] = score_c4a
@@ -414,6 +576,31 @@ class ContentExtractor:
                 error=res_c4a.error,
             )
         )
+
+        # 4. Engine D: Playwright (included when requested or benchmark_all)
+        if include_playwright:
+            res_pw = await self.playwright_engine.extract(
+                final_url,
+                html=html,
+                render_js=True,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
+            )
+            score_pw = self._score_engine_result(res_pw, html)
+            results["playwright"] = res_pw
+            scores["playwright"] = score_pw
+            attempts.append(
+                ExtractionAttempt(
+                    engine="playwright",
+                    status="success" if res_pw.success else "failed",
+                    latency_ms=res_pw.latency_ms,
+                    char_count=res_pw.char_count,
+                    word_count=res_pw.word_count,
+                    quality_score=score_pw,
+                    reason="Compare mode benchmark",
+                    error=res_pw.error,
+                )
+            )
 
         # Pick winning engine with highest quality score
         winner_engine = max(scores, key=lambda k: scores[k])
@@ -442,20 +629,41 @@ class ContentExtractor:
                     "success": results[eng].success,
                     "error": results[eng].error,
                 }
-                for eng in ("trafilatura", "beautifulsoup", "crawl4ai")
+                for eng in results
             },
         }
 
         return self.quality_checker.check(document)
 
-    async def _run_single_engine(self, engine_name: str, url: str, html: str) -> EngineResult:
+    async def _run_single_engine(
+        self,
+        engine_name: str,
+        url: str,
+        html: str,
+        loading_delay: float = 0.0,
+        wait_for_selector: Optional[str] = None,
+    ) -> EngineResult:
         """Execute a specific engine safely and return its EngineResult."""
         if engine_name == "trafilatura":
             return self.trafilatura_engine.extract(html, url)
         elif engine_name in ("beautifulsoup", "bs4"):
             return self.bs4_engine.extract(html, url)
         elif engine_name == "crawl4ai":
-            return await self.crawl4ai_engine.extract(url, html=html, render_js=True)
+            return await self.crawl4ai_engine.extract(
+                url,
+                html=html,
+                render_js=True,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
+            )
+        elif engine_name in ("playwright", "playwrite", "pw"):
+            return await self.playwright_engine.extract(
+                url,
+                html=html,
+                render_js=True,
+                loading_delay=loading_delay,
+                wait_for_selector=wait_for_selector,
+            )
         else:
             return EngineResult(
                 engine=engine_name,
@@ -463,9 +671,56 @@ class ContentExtractor:
                 error=f"Unknown engine: {engine_name}",
             )
 
+    async def _extract_via_playwright_direct(
+        self,
+        url: str,
+        loading_delay: float = 0.0,
+        wait_for_selector: Optional[str] = None,
+    ) -> ExtractedDocument:
+        """Direct extraction via Playwright Chromium browser without preliminary httpx fetch."""
+        start_time = time.perf_counter()
+        res = await self.playwright_engine.extract(
+            url=url,
+            render_js=True,
+            loading_delay=loading_delay,
+            wait_for_selector=wait_for_selector,
+        )
+        score = self._score_engine_result(res, raw_html="")
+
+        attempts = [
+            ExtractionAttempt(
+                engine="playwright",
+                status="success" if res.success else "failed",
+                latency_ms=res.latency_ms,
+                char_count=res.char_count,
+                word_count=res.word_count,
+                quality_score=score,
+                reason="Direct Playwright Chromium capture",
+                error=res.error,
+            )
+        ]
+
+        page_type = self.page_classifier.classify(url=url, html=res.text or "")
+        doc = self._build_document(
+            url=url,
+            final_url=res.canonical_url or url,
+            engine_result=res,
+            raw_html="",
+            http_status=200 if res.success else 500,
+            fetched_at=datetime.now(timezone.utc),
+            page_type=page_type,
+            attempts=attempts,
+        )
+        return self.quality_checker.check(doc)
+
     def _score_engine_result(self, res: EngineResult, raw_html: str) -> int:
         """Calculate quality score for an EngineResult."""
         if not res.has_content:
+            return 0
+
+        # Check if the extracted content is merely a loading indicator or splash screen
+        if is_loading_text(res.text, title=res.title):
+            res.warnings.append("محتوای استخراج‌شده به عنوان پیام یا صفحه لودینگ اولیه تشخیص داده شد.")
             return 0
 
         # Construct temporary lightweight document to score
@@ -543,6 +798,10 @@ class ContentExtractor:
         if not language and raw_html:
             language = self.link_discovery.extract_language(raw_html)
 
+        all_warnings = list(engine_result.warnings)
+        if engine_result.error and engine_result.error not in all_warnings:
+            all_warnings.append(engine_result.error)
+
         doc = ExtractedDocument(
             document_id=hashlib.sha256(f"{final_url}:{time.time()}".encode()).hexdigest()[:16],
             url=url,
@@ -564,7 +823,7 @@ class ContentExtractor:
             extraction_method=engine_result.engine,
             extractor_used=engine_result.engine,
             quality_status=QualityStatus.SUCCESS if cleaned_text else QualityStatus.EMPTY,
-            warnings=list(engine_result.warnings),
+            warnings=all_warnings,
             page_type=page_type,
             extraction_attempts=attempts,
             metadata=dict(engine_result.metadata),
@@ -575,10 +834,20 @@ class ContentExtractor:
         doc.quality_report = report
         return doc
 
-    async def _extract_via_crawl4ai_direct(self, url: str) -> ExtractedDocument:
+    async def _extract_via_crawl4ai_direct(
+        self,
+        url: str,
+        loading_delay: float = 0.0,
+        wait_for_selector: Optional[str] = None,
+    ) -> ExtractedDocument:
         """Direct extraction via Crawl4AI browser without preliminary httpx fetch."""
         start_time = time.perf_counter()
-        res = await self.crawl4ai_engine.extract(url=url, render_js=True)
+        res = await self.crawl4ai_engine.extract(
+            url=url,
+            render_js=True,
+            loading_delay=loading_delay,
+            wait_for_selector=wait_for_selector,
+        )
         score = self._score_engine_result(res, raw_html="")
 
         attempts = [

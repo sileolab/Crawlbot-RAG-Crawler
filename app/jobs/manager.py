@@ -241,6 +241,8 @@ class JobManager:
         min_quality_score = int(job.config.get("min_quality_score", 40))
         max_concurrency = int(job.config.get("max_concurrency", 3))
         request_timeout = float(job.config.get("request_timeout", 30.0))
+        loading_delay = float(job.config.get("loading_delay", 0.0))
+        wait_for_selector = job.config.get("wait_for_selector")
         min_word_count = int(job.config.get("min_word_count", 20))
         min_char_count = int(job.config.get("min_char_count", 100))
 
@@ -275,6 +277,8 @@ class JobManager:
                         url,
                         timeout=request_timeout,
                         crawl_mode=crawl_mode,
+                        loading_delay=loading_delay,
+                        wait_for_selector=wait_for_selector,
                     )
                     doc = quality_checker.check(doc)
 

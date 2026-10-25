@@ -5,8 +5,17 @@ Exposes REST API endpoints and serves the local RTL-friendly GUI.
 
 from __future__ import annotations
 
+import asyncio
 import os
+import sys
 from pathlib import Path
+
+# Ensure Windows ProactorEventLoop is active for subprocess spawning (Playwright, Chromium, Crawl4AI)
+if sys.platform == "win32":
+    try:
+        asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+    except Exception:
+        pass
 
 import uvicorn
 from fastapi import FastAPI
